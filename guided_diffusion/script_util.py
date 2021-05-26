@@ -283,6 +283,7 @@ def sr_create_model_and_diffusion(
     num_channels,
     num_res_blocks,
     num_heads,
+    num_head_channels,
     num_heads_upsample,
     attention_resolutions,
     dropout,
@@ -295,6 +296,8 @@ def sr_create_model_and_diffusion(
     rescale_learned_sigmas,
     use_checkpoint,
     use_scale_shift_norm,
+    resblock_updown,
+    use_fp16,
 ):
     model = sr_create_model(
         large_size,
@@ -306,9 +309,12 @@ def sr_create_model_and_diffusion(
         use_checkpoint=use_checkpoint,
         attention_resolutions=attention_resolutions,
         num_heads=num_heads,
+        num_head_channels=num_head_channels,
         num_heads_upsample=num_heads_upsample,
         use_scale_shift_norm=use_scale_shift_norm,
         dropout=dropout,
+        resblock_updown=resblock_updown,
+        use_fp16=use_fp16,
     )
     diffusion = create_gaussian_diffusion(
         steps=diffusion_steps,
@@ -333,13 +339,18 @@ def sr_create_model(
     use_checkpoint,
     attention_resolutions,
     num_heads,
+    num_head_channels,
     num_heads_upsample,
     use_scale_shift_norm,
     dropout,
+    resblock_updown,
+    use_fp16,
 ):
     _ = small_size  # hack to prevent unused variable
 
-    if large_size == 256:
+    if large_size == 512:
+        channel_mult = (1, 1, 2, 2, 4, 4)
+    elif large_size == 256:
         channel_mult = (1, 1, 2, 2, 4, 4)
     elif large_size == 64:
         channel_mult = (1, 2, 3, 4)
@@ -362,8 +373,11 @@ def sr_create_model(
         num_classes=(NUM_CLASSES if class_cond else None),
         use_checkpoint=use_checkpoint,
         num_heads=num_heads,
+        num_head_channels=num_head_channels,
         num_heads_upsample=num_heads_upsample,
         use_scale_shift_norm=use_scale_shift_norm,
+        resblock_updown=resblock_updown,
+        use_fp16=use_fp16,
     )
 
 

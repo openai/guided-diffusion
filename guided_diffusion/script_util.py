@@ -147,7 +147,7 @@ def create_model(
 ):
     if channel_mult == "":
         if image_size == 512:
-            channel_mult = (1, 1, 2, 2, 4, 4)
+            channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
         elif image_size == 256:
             channel_mult = (1, 1, 2, 2, 4, 4)
         elif image_size == 128:
@@ -235,7 +235,9 @@ def create_classifier(
     classifier_resblock_updown,
     classifier_pool,
 ):
-    if image_size == 256:
+    if image_size == 512:
+        channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
+    elif image_size == 256:
         channel_mult = (1, 1, 2, 2, 4, 4)
     elif image_size == 128:
         channel_mult = (1, 1, 2, 3, 4)

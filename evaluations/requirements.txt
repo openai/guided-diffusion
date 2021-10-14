@@ -1,0 +1,4 @@
+tensorflow-gpu>=2.0
+scipy
+requests
+tqdm

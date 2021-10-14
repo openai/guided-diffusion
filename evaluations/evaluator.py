@@ -427,12 +427,33 @@ class NpzArrayReader(ABC):
     def read_batch(self, batch_size: int) -> Optional[np.ndarray]:
         pass
 
+    @abstractmethod
+    def remaining(self) -> int:
+        pass
+
     def read_batches(self, batch_size: int) -> Iterable[np.ndarray]:
-        while True:
-            batch = self.read_batch(batch_size)
-            if batch is None:
-                break
-            yield batch
+        def gen_fn():
+            while True:
+                batch = self.read_batch(batch_size)
+                if batch is None:
+                    break
+                yield batch
+
+        rem = self.remaining()
+        num_batches = rem // batch_size + int(rem % batch_size != 0)
+        return BatchIterator(gen_fn, num_batches)
+
+
+class BatchIterator:
+    def __init__(self, gen_fn, length):
+        self.gen_fn = gen_fn
+        self.length = length
+
+    def __len__(self):
+        return self.length
+
+    def __iter__(self):
+        return self.gen_fn()
 
 
 class StreamingNpzArrayReader(NpzArrayReader):
@@ -457,6 +478,9 @@ class StreamingNpzArrayReader(NpzArrayReader):
         data = _read_bytes(self.arr_f, read_size, "array data")
         return np.frombuffer(data, dtype=self.dtype).reshape([bs, *self.shape[1:]])
 
+    def remaining(self) -> int:
+        return max(0, self.shape[0] - self.idx)
+
 
 class MemoryNpzArrayReader(NpzArrayReader):
     def __init__(self, arr):
@@ -476,6 +500,9 @@ class MemoryNpzArrayReader(NpzArrayReader):
         res = self.arr[self.idx : self.idx + batch_size]
         self.idx += batch_size
         return res
+
+    def remaining(self) -> int:
+        return max(0, self.arr.shape[0] - self.idx)
 
 
 @contextmanager

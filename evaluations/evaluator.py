@@ -133,7 +133,7 @@ class Evaluator:
             self.softmax = _create_softmax_graph(self.softmax_input)
 
     def warmup(self):
-        self.get_activations(np.zeros([1, 8, 64, 64, 3]))
+        self.compute_activations(np.zeros([1, 8, 64, 64, 3]))
 
     def read_activations(self, npz_path: str) -> Tuple[np.ndarray, np.ndarray]:
         with open_npz_array(npz_path, "arr_0") as reader:

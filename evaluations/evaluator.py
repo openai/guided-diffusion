@@ -36,6 +36,9 @@ def main():
     config.gpu_options.allow_growth = True
     evaluator = Evaluator(tf.Session(config=config))
 
+    print("warming up TensorFlow...")
+    evaluator.warmup()
+
     print("computing reference batch activations...")
     ref_acts = evaluator.read_activations(args.ref_batch)
     print("computing/reading reference batch statistics...")
@@ -126,6 +129,9 @@ class Evaluator:
             self.softmax_input = tf.placeholder(tf.float32, shape=[None, 2048])
             self.pool_features, self.spatial_features = _create_feature_graph(self.image_input)
             self.softmax = _create_softmax_graph(self.softmax_input)
+
+    def warmup(self):
+        self.get_activations(np.zeros([1, 8, 64, 64, 3]))
 
     def read_activations(self, npz_path: str) -> Tuple[np.ndarray, np.ndarray]:
         with open_npz_array(npz_path, "arr_0") as reader:

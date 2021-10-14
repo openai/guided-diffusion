@@ -37,6 +37,8 @@ def main():
     evaluator = Evaluator(tf.Session(config=config))
 
     print("warming up TensorFlow...")
+    # This will cause TF to print a bunch of verbose stuff now rather
+    # than after the next print(), to help prevent confusion.
     evaluator.warmup()
 
     print("computing reference batch activations...")

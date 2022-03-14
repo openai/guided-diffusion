@@ -51,6 +51,7 @@ def main():
         ema_rate=args.ema_rate,
         log_interval=args.log_interval,
         save_interval=args.save_interval,
+        plot_iterval=args.plot_interval,
         resume_checkpoint=args.resume_checkpoint,
         use_fp16=args.use_fp16,
         fp16_scale_growth=args.fp16_scale_growth,

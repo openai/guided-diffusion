@@ -7,11 +7,21 @@ import torch as th
 import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
+from torchvision.utils import make_grid
+import matplotlib.pyplot as plt
 
 from . import dist_util, logger
 from .fp16_util import MixedPrecisionTrainer
 from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
+
+from guided_diffusion.script_util import (
+    NUM_CLASSES,
+    model_and_diffusion_defaults,
+    create_model_and_diffusion,
+    add_dict_to_argparser,
+    args_to_dict,
+)
 
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
@@ -21,27 +31,37 @@ INITIAL_LOG_LOSS_SCALE = 20.0
 
 class TrainLoop:
     def __init__(
-        self,
-        *,
-        model,
-        diffusion,
-        data,
-        batch_size,
-        microbatch,
-        lr,
-        ema_rate,
-        log_interval,
-        save_interval,
-        resume_checkpoint,
-        use_fp16=False,
-        fp16_scale_growth=1e-3,
-        schedule_sampler=None,
-        weight_decay=0.0,
-        lr_anneal_steps=0,
+            self,
+            *,
+            model,
+            diffusion,
+            data,
+            batch_size,
+            microbatch,
+            lr,
+            ema_rate,
+            log_interval,
+            save_interval,
+            plot_interval,
+            resume_checkpoint,
+            task_id,
+            use_fp16=False,
+            fp16_scale_growth=1e-3,
+            schedule_sampler=None,
+            weight_decay=0.0,
+            lr_anneal_steps=0,
+            scheduler_rate=1,
+            scheduler_step=1000,
+            num_steps=10000,
+            image_size=32,
+            in_channels=3,
     ):
+        self.task_id = task_id
         self.model = model
         self.diffusion = diffusion
         self.data = data
+        self.image_size = image_size
+        self.in_channels = in_channels
         self.batch_size = batch_size
         self.microbatch = microbatch if microbatch > 0 else batch_size
         self.lr = lr
@@ -52,12 +72,14 @@ class TrainLoop:
         )
         self.log_interval = log_interval
         self.save_interval = save_interval
+        self.plot_interval = plot_interval
         self.resume_checkpoint = resume_checkpoint
         self.use_fp16 = use_fp16
         self.fp16_scale_growth = fp16_scale_growth
         self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
         self.weight_decay = weight_decay
         self.lr_anneal_steps = lr_anneal_steps
+        self.num_steps = num_steps
 
         self.step = 0
         self.resume_step = 0
@@ -75,6 +97,8 @@ class TrainLoop:
         self.opt = AdamW(
             self.mp_trainer.master_params, lr=self.lr, weight_decay=self.weight_decay
         )
+        self.scheduler = th.optim.lr_scheduler.ExponentialLR(self.opt, gamma=scheduler_rate)
+        self.scheduler_step = scheduler_step
         if self.resume_step:
             self._load_optimizer_state()
             # Model was resumed, either due to a restart or a checkpoint
@@ -152,8 +176,9 @@ class TrainLoop:
 
     def run_loop(self):
         while (
-            not self.lr_anneal_steps
-            or self.step + self.resume_step < self.lr_anneal_steps
+                not self.lr_anneal_steps
+                or self.step + self.resume_step < self.lr_anneal_steps
+                or self.step > self.num_steps
         ):
             batch, cond = next(self.data)
             self.run_step(batch, cond)
@@ -164,10 +189,16 @@ class TrainLoop:
                 # Run for a finite amount of time in integration tests.
                 if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
                     return
+            if self.step % self.plot_interval == 0:
+                self.plot(self.task_id, self.step)
+            if self.step % self.scheduler_step == 0:
+                self.scheduler.step()
             self.step += 1
         # Save the last checkpoint if it wasn't already saved.
         if (self.step - 1) % self.save_interval != 0:
             self.save()
+        if (self.step - 1) % self.plot_interval != 0:
+            self.plot(self.task_id, self.step)
 
     def run_step(self, batch, cond):
         self.forward_backward(batch, cond)
@@ -180,11 +211,12 @@ class TrainLoop:
     def forward_backward(self, batch, cond):
         self.mp_trainer.zero_grad()
         for i in range(0, batch.shape[0], self.microbatch):
-            micro = batch[i : i + self.microbatch].to(dist_util.dev())
-            micro_cond = {
-                k: v[i : i + self.microbatch].to(dist_util.dev())
-                for k, v in cond.items()
-            }
+            micro = batch[i: i + self.microbatch].to(dist_util.dev())
+            micro_cond = cond[i: i + self.microbatch].to(dist_util.dev())  # {
+            micro_cond = {}
+            #     k: v[i : i + self.microbatch].to(dist_util.dev())
+            #     for k, v in cond.items()
+            # }
             last_batch = (i + self.microbatch) >= batch.shape[0]
             t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
 
@@ -235,9 +267,9 @@ class TrainLoop:
             if dist.get_rank() == 0:
                 logger.log(f"saving model {rate}...")
                 if not rate:
-                    filename = f"model{(self.step+self.resume_step):06d}.pt"
+                    filename = f"model{(self.step + self.resume_step):06d}.pt"
                 else:
-                    filename = f"ema_{rate}_{(self.step+self.resume_step):06d}.pt"
+                    filename = f"ema_{rate}_{(self.step + self.resume_step):06d}.pt"
                 with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
                     th.save(state_dict, f)
 
@@ -247,12 +279,48 @@ class TrainLoop:
 
         if dist.get_rank() == 0:
             with bf.BlobFile(
-                bf.join(get_blob_logdir(), f"opt{(self.step+self.resume_step):06d}.pt"),
-                "wb",
+                    bf.join(get_blob_logdir(), f"opt{(self.step + self.resume_step):06d}.pt"),
+                    "wb",
             ) as f:
                 th.save(self.opt.state_dict(), f)
 
         dist.barrier()
+
+    @th.no_grad()
+    def plot(self, task_id, step, num_exammples=16):
+        model = self.mp_trainer.model
+        model.eval()
+        model_kwargs = {}
+        # if self.class_cond:
+        #     classes = th.randint(
+        #         low=0, high=NUM_CLASSES, size=(args.batch_size,), device=dist_util.dev()
+        #     )
+        #     model_kwargs["y"] = classes
+        sample_fn = (
+            self.diffusion.p_sample_loop  # if not self.use_ddim else diffusion.ddim_sample_loop
+        )
+        sample = sample_fn(
+            model,
+            (num_exammples, self.in_channels, self.image_size, self.image_size),
+            clip_denoised=False, model_kwargs=model_kwargs,
+        )
+        sample = ((sample + 1) * 127.5).clamp(0, 255).to(th.uint8)
+        sample = sample.permute(0, 2, 3, 1)
+        sample = sample.contiguous()
+        #
+        # gathered_samples = [th.zeros_like(sample) for _ in range(dist.get_world_size())]
+        # dist.all_gather(gathered_samples, sample)  # gather not supported with NCCL
+        # all_images = ([sample.cpu().numpy() for sample in gathered_samples])
+
+        samples_grid = make_grid(sample.permute(0, 3, 2, 1), 4).permute(2, 1, 0).cpu()
+        plt.imshow(samples_grid)
+        plt.axis('off')
+        if not os.path.exists(os.path.join(logger.get_dir(), f"samples/")):
+            os.makedirs(os.path.join(logger.get_dir(), f"samples/"))
+        out_plot = os.path.join(logger.get_dir(), f"samples/task_{task_id:02d}_step_{step:06d}")
+        plt.savefig(out_plot)
+
+        model.train()
 
 
 def parse_resume_step_from_filename(filename):

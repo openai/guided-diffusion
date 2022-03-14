@@ -18,12 +18,14 @@ from guided_diffusion.script_util import (
     add_dict_to_argparser,
     args_to_dict,
 )
+from torchvision.utils import make_grid
+import matplotlib.pyplot as plt
 
 
 def main():
     args = create_argparser().parse_args()
 
-    dist_util.setup_dist()
+    dist_util.setup_dist(args)
     logger.configure()
 
     logger.log("creating model and diffusion...")
@@ -79,7 +81,7 @@ def main():
         label_arr = label_arr[: args.num_samples]
     if dist.get_rank() == 0:
         shape_str = "x".join([str(x) for x in arr.shape])
-        out_path = os.path.join(logger.get_dir(), f"samples_{shape_str}.npz")
+        out_path = os.path.join(logger.get_dir(), f"samples_{args.model_path.split('/')[-1][:-3]}.npz")
         logger.log(f"saving to {out_path}")
         if args.class_cond:
             np.savez(out_path, arr, label_arr)
@@ -87,6 +89,12 @@ def main():
             np.savez(out_path, arr)
 
     dist.barrier()
+    plt.figure()
+    plt.axis('off')
+    samples_grid = make_grid(th.from_numpy((arr.swapaxes(1, 3))), 4).permute(2, 1, 0)
+    plt.imshow(samples_grid)
+    out_plot = os.path.join(logger.get_dir(), f"samples_{args.model_path.split('/')[-1][:-3]}")
+    plt.savefig(out_plot)
     logger.log("sampling complete")
 
 
@@ -97,6 +105,7 @@ def create_argparser():
         batch_size=16,
         use_ddim=False,
         model_path="",
+        gpu_id=-1,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

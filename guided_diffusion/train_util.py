@@ -9,24 +9,19 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torchvision.utils import make_grid
 import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
 
 from . import dist_util, logger
 from .fp16_util import MixedPrecisionTrainer
 from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
 
-from guided_diffusion.script_util import (
-    NUM_CLASSES,
-    model_and_diffusion_defaults,
-    create_model_and_diffusion,
-    add_dict_to_argparser,
-    args_to_dict,
-)
-
+import wandb
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
 # 20-21 within the first ~1K steps of training.
-INITIAL_LOG_LOSS_SCALE = 20.0
+# INITIAL_LOG_LOSS_SCALE = 20.0
 
 
 class TrainLoop:
@@ -176,27 +171,28 @@ class TrainLoop:
 
     def run_loop(self):
         while (
-                not self.lr_anneal_steps
-                or self.step + self.resume_step < self.lr_anneal_steps
-                or self.step > self.num_steps
+                (not self.lr_anneal_steps
+                or self.step + self.resume_step < self.lr_anneal_steps) and (self.step < self.num_steps)
         ):
             batch, cond = next(self.data)
             self.run_step(batch, cond)
             if self.step % self.log_interval == 0:
+                wandb.log(logger.getkvs())
                 logger.dumpkvs()
             if self.step % self.save_interval == 0:
-                self.save()
+                self.save(self.task_id)
                 # Run for a finite amount of time in integration tests.
                 if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
                     return
-            if self.step % self.plot_interval == 0:
-                self.plot(self.task_id, self.step)
-            if self.step % self.scheduler_step == 0:
-                self.scheduler.step()
+            if self.step > 0:
+                if self.step % self.plot_interval == 0:
+                    self.plot(self.task_id, self.step)
+                if self.step % self.scheduler_step == 0:
+                    self.scheduler.step()
             self.step += 1
         # Save the last checkpoint if it wasn't already saved.
         if (self.step - 1) % self.save_interval != 0:
-            self.save()
+            self.save(self.task_id)
         if (self.step - 1) % self.plot_interval != 0:
             self.plot(self.task_id, self.step)
 
@@ -261,15 +257,15 @@ class TrainLoop:
         logger.logkv("step", self.step + self.resume_step)
         logger.logkv("samples", (self.step + self.resume_step + 1) * self.global_batch)
 
-    def save(self):
+    def save(self, task_id):
         def save_checkpoint(rate, params):
             state_dict = self.mp_trainer.master_params_to_state_dict(params)
             if dist.get_rank() == 0:
                 logger.log(f"saving model {rate}...")
                 if not rate:
-                    filename = f"model{(self.step + self.resume_step):06d}.pt"
+                    filename = f"model{(self.step + self.resume_step):06d}_{task_id}.pt"
                 else:
-                    filename = f"ema_{rate}_{(self.step + self.resume_step):06d}.pt"
+                    filename = f"ema_{rate}_{(self.step + self.resume_step):06d}_{task_id}.pt"
                 with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
                     th.save(state_dict, f)
 
@@ -304,15 +300,11 @@ class TrainLoop:
             (num_exammples, self.in_channels, self.image_size, self.image_size),
             clip_denoised=False, model_kwargs=model_kwargs,
         )
-        sample = ((sample + 1) * 127.5).clamp(0, 255).to(th.uint8)
-        sample = sample.permute(0, 2, 3, 1)
-        sample = sample.contiguous()
-        #
-        # gathered_samples = [th.zeros_like(sample) for _ in range(dist.get_world_size())]
-        # dist.all_gather(gathered_samples, sample)  # gather not supported with NCCL
-        # all_images = ([sample.cpu().numpy() for sample in gathered_samples])
 
-        samples_grid = make_grid(sample.permute(0, 3, 2, 1), 4).permute(2, 1, 0).cpu()
+        samples_grid = make_grid(sample.detach().cpu(), 4, normalize=True).permute(1, 2, 0)
+        sample_wandb = wandb.Image(samples_grid.permute(2,0,1), caption=f"sample_task_{task_id}")
+        wandb.log({"sampled_images": sample_wandb})
+
         plt.imshow(samples_grid)
         plt.axis('off')
         if not os.path.exists(os.path.join(logger.get_dir(), f"samples/")):

@@ -18,7 +18,10 @@ from guided_diffusion.script_util import (
 )
 from torch.utils import data
 from guided_diffusion.train_util import TrainLoop
+import os
+import wandb
 
+# os.environ["WANDB_MODE"] = "disabled"
 
 def yielder(loader):
     while True:
@@ -26,6 +29,8 @@ def yielder(loader):
 
 def main():
     args = create_argparser().parse_args()
+    wandb.init(project="continual_diffusion", name=args.experiment_name, config=args)
+    os.environ["OPENAI_LOGDIR"]= f"results/{args.experiment_name}"
 
     dist_util.setup_dist(args)
     logger.configure()
@@ -43,6 +48,8 @@ def main():
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())
     )
+    if not os.environ.get("WANDB_MODE") == "disabled":
+        wandb.watch(model, log_freq=10)
     model.to(dist_util.dev())
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
 
@@ -59,7 +66,7 @@ def main():
                                                                              limit_classes=args.limit_classes)
 
     for task_id in range(args.num_tasks):
-        train_dataset_loader = data.DataLoader(dataset=train_dataset_splits[0],
+        train_dataset_loader = data.DataLoader(dataset=train_dataset_splits[task_id],
                                                batch_size=args.batch_size, shuffle=True,
                                                drop_last=True)
 
@@ -92,6 +99,7 @@ def main():
 
 def create_argparser():
     defaults = dict(
+        experiment_name="test",
         dataroot="data/",
         dataset="MNIST",
         schedule_sampler="uniform",
@@ -116,7 +124,7 @@ def create_argparser():
         train_aug=False,
         limit_data=None,
         num_steps=10000,
-        scheduler_rate=1
+        scheduler_rate=1.0
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

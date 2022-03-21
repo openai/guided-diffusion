@@ -18,6 +18,8 @@ from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
 
 import wandb
+
+
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
 # 20-21 within the first ~1K steps of training.
@@ -50,6 +52,8 @@ class TrainLoop:
             num_steps=10000,
             image_size=32,
             in_channels=3,
+            class_cond=False,
+            max_class=None,
     ):
         self.task_id = task_id
         self.model = model
@@ -60,6 +64,8 @@ class TrainLoop:
         self.batch_size = batch_size
         self.microbatch = microbatch if microbatch > 0 else batch_size
         self.lr = lr
+        self.class_cond = class_cond
+        self.max_class = max_class
         self.ema_rate = (
             [ema_rate]
             if isinstance(ema_rate, float)
@@ -172,7 +178,7 @@ class TrainLoop:
     def run_loop(self):
         while (
                 (not self.lr_anneal_steps
-                or self.step + self.resume_step < self.lr_anneal_steps) and (self.step < self.num_steps)
+                 or self.step + self.resume_step < self.lr_anneal_steps) and (self.step < self.num_steps)
         ):
             batch, cond = next(self.data)
             self.run_step(batch, cond)
@@ -208,11 +214,11 @@ class TrainLoop:
         self.mp_trainer.zero_grad()
         for i in range(0, batch.shape[0], self.microbatch):
             micro = batch[i: i + self.microbatch].to(dist_util.dev())
-            micro_cond = cond[i: i + self.microbatch].to(dist_util.dev())  # {
-            micro_cond = {}
-            #     k: v[i : i + self.microbatch].to(dist_util.dev())
-            #     for k, v in cond.items()
-            # }
+            # micro_cond = cond[i: i + self.microbatch].to(dist_util.dev())  # {
+            micro_cond = {
+                k: v[i: i + self.microbatch].to(dist_util.dev())
+                for k, v in cond.items()
+            }
             last_batch = (i + self.microbatch) >= batch.shape[0]
             t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
 
@@ -287,11 +293,12 @@ class TrainLoop:
         model = self.mp_trainer.model
         model.eval()
         model_kwargs = {}
-        # if self.class_cond:
-        #     classes = th.randint(
-        #         low=0, high=NUM_CLASSES, size=(args.batch_size,), device=dist_util.dev()
-        #     )
-        #     model_kwargs["y"] = classes
+        if self.class_cond:
+            classes = th.tensor((list(range(self.max_class+1))*(num_exammples))[:num_exammples], device=dist_util.dev())
+            # classes = th.randint(
+            #     low=0, high=4, size=(num_exammples,), device=dist_util.dev()
+            # )
+            model_kwargs["y"] = classes
         sample_fn = (
             self.diffusion.p_sample_loop  # if not self.use_ddim else diffusion.ddim_sample_loop
         )
@@ -302,7 +309,7 @@ class TrainLoop:
         )
 
         samples_grid = make_grid(sample.detach().cpu(), 4, normalize=True).permute(1, 2, 0)
-        sample_wandb = wandb.Image(samples_grid.permute(2,0,1), caption=f"sample_task_{task_id}")
+        sample_wandb = wandb.Image(samples_grid.permute(2, 0, 1), caption=f"sample_task_{task_id}")
         wandb.log({"sampled_images": sample_wandb})
 
         plt.imshow(samples_grid)

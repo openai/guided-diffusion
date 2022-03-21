@@ -47,7 +47,8 @@ def CelebA(root, skip_normalization=False, train_aug=False, image_size=64, targe
 
 
 def MNIST(dataroot, skip_normalization=False, train_aug=False):
-    normalize = transforms.Normalize(mean=(0.1307,), std=(0.3081,))  # for 28x28
+    normalize = transforms.Normalize(mean=(0.5,), std=(0.5,))
+    # normalize = transforms.Normalize(mean=(0.1307,), std=(0.3081,))  # for 28x28
     # normalize = transforms.Normalize(mean=(0.1000,), std=(0.2752,))  # for 32x32
 
     if skip_normalization:
@@ -224,9 +225,9 @@ def DoubleMNIST(dataroot, skip_normalization=False, train_aug=False):
     return train_dataset, val_dataset, 28, 1
 
 
-def CIFAR10(dataroot, skip_normalization=False, train_aug=True):
-    normalize = transforms.Normalize(mean=[0.491, 0.482, 0.447], std=[0.247, 0.243, 0.262])
-
+def CIFAR10(dataroot, skip_normalization=False, train_aug=False):
+    # normalize = transforms.Normalize(mean=[0.491, 0.482, 0.447], std=[0.247, 0.243, 0.262])
+    normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     if skip_normalization:
         val_transform = transforms.Compose([
             transforms.ToTensor(),

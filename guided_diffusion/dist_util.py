@@ -22,7 +22,7 @@ def setup_dist(args):
     """
     Setup a distributed process group.
     """
-    if args.gpu_id:
+    if args.gpu_id!=-2:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
 
@@ -51,7 +51,7 @@ def dev():
     Get the device to use for torch.distributed.
     """
     if th.cuda.is_available():
-        return th.device(f"cuda:0")
+        return th.device(f"cuda")
     return th.device("cpu")
 
 

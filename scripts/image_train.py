@@ -21,21 +21,29 @@ from guided_diffusion.train_util import TrainLoop
 import os
 import wandb
 
+import torch
+
+print("Is CUDA available:", torch.cuda.is_available())
+
+
 # os.environ["WANDB_MODE"] = "disabled"
 
 def yielder(loader):
     while True:
         yield from loader
 
+
 def main():
     args = create_argparser().parse_args()
-    wandb.init(project="continual_diffusion", name=args.experiment_name, config=args)
-    os.environ["OPENAI_LOGDIR"]= f"results/{args.experiment_name}"
+    os.environ["WANDB_API_KEY"] = args.wandb_api_key
+    wandb.init(project="continual_diffusion", name=args.experiment_name, config=args, entity="generative_cl")
+    os.environ["OPENAI_LOGDIR"] = f"results/{args.experiment_name}"
 
     dist_util.setup_dist(args)
     logger.configure()
 
-    train_dataset, val_dataset, image_size, image_channels = base.__dict__[args.dataset](args.dataroot, args.train_aug)
+    train_dataset, val_dataset, image_size, image_channels = base.__dict__[args.dataset](args.dataroot,
+                                                                                         train_aug=args.train_aug)
 
     args.image_size = image_size
     args.in_channels = image_channels
@@ -56,6 +64,8 @@ def main():
     logger.log("creating data loader...")
 
     train_dataset_splits, val_dataset_splits, task_output_space = data_split(dataset=train_dataset,
+                                                                             return_classes=args.class_cond,
+                                                                             return_task_as_class=args.use_task_index,
                                                                              dataset_name=args.dataset.lower(),
                                                                              num_batches=args.num_tasks,
                                                                              num_classes=n_classes,
@@ -70,12 +80,21 @@ def main():
                                                batch_size=args.batch_size, shuffle=True,
                                                drop_last=True)
 
-
+        if args.class_cond:
+            if args.use_task_index:
+                max_class = task_id
+            else:
+                raise NotImplementedError() #Classes seen so far for plotting and sampling
+        else:
+            max_class = None
         logger.log("training...")
+        num_steps = args.num_steps
+        if task_id == 0:
+            num_steps = num_steps
         TrainLoop(
             model=model,
             diffusion=diffusion,
-            task_id = task_id,
+            task_id=task_id,
             data=yielder(train_dataset_loader),
             batch_size=args.batch_size,
             microbatch=args.microbatch,
@@ -91,14 +110,17 @@ def main():
             schedule_sampler=schedule_sampler,
             weight_decay=args.weight_decay,
             lr_anneal_steps=args.lr_anneal_steps,
-            num_steps=args.num_steps,
+            num_steps=num_steps,
             image_size=args.image_size,
-            in_channels=args.in_channels
+            in_channels=args.in_channels,
+            class_cond=args.class_cond,
+            max_class=max_class
         ).run_loop()
 
 
 def create_argparser():
     defaults = dict(
+        wandb_api_key="",
         experiment_name="test",
         dataroot="data/",
         dataset="MNIST",
@@ -107,7 +129,7 @@ def create_argparser():
         weight_decay=0.0,
         lr_anneal_steps=0,
         batch_size=32,
-        microbatch =-1,  # -1 disables microbatches
+        microbatch=-1,  # -1 disables microbatches
         ema_rate="0.9999",  # comma-separated list of EMA values
         log_interval=10,
         save_interval=5000,
@@ -124,7 +146,8 @@ def create_argparser():
         train_aug=False,
         limit_data=None,
         num_steps=10000,
-        scheduler_rate=1.0
+        scheduler_rate=1.0,
+        use_task_index=True
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

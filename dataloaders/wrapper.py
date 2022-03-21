@@ -3,6 +3,7 @@ from copy import deepcopy
 
 import torch
 import torch.utils.data as data
+import numpy as np
 
 
 class CacheClassLabel(data.Dataset):
@@ -45,19 +46,27 @@ class AppendName(data.Dataset):
     """
     A dataset wrapper that also return the name of the dataset/task
     """
-    def __init__(self, dataset, name, first_class_ind=0):
+    def __init__(self, dataset, name, return_classes=False, return_task_as_class=False, task_id=0, first_class_ind=0):
         super(AppendName,self).__init__()
         self.dataset = dataset
         self.name = name
-        self.first_class_ind = first_class_ind  # For remapping the class index
+        self.first_class_ind = first_class_ind
+        self.task_id = task_id # For remapping the class index
+        self.return_classes = return_classes
+        self.return_task_as_class = return_task_as_class
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        img,target = self.dataset[index]
+        img, target = self.dataset[index]
         target = target + self.first_class_ind
-        return img, target #, self.name
+        out_dict = {}
+        if self.return_task_as_class:
+            out_dict["y"] = np.array(self.task_id, dtype=np.int64)
+        elif self.return_classes:
+            out_dict["y"] = np.array(target, dtype=np.int64)
+        return img, out_dict #target #, self.name
 
 
 class Subclass(data.Dataset):

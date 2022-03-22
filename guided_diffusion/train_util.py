@@ -38,6 +38,7 @@ class TrainLoop:
             lr,
             ema_rate,
             log_interval,
+            skip_save,
             save_interval,
             plot_interval,
             resume_checkpoint,
@@ -73,6 +74,7 @@ class TrainLoop:
         )
         self.log_interval = log_interval
         self.save_interval = save_interval
+        self.skip_save = skip_save
         self.plot_interval = plot_interval
         self.resume_checkpoint = resume_checkpoint
         self.use_fp16 = use_fp16
@@ -185,7 +187,7 @@ class TrainLoop:
             if self.step % self.log_interval == 0:
                 wandb.log(logger.getkvs())
                 logger.dumpkvs()
-            if self.step % self.save_interval == 0:
+            if (not self.skip_save) & (self.step % self.save_interval == 0):
                 self.save(self.task_id)
                 # Run for a finite amount of time in integration tests.
                 if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
@@ -197,8 +199,9 @@ class TrainLoop:
                     self.scheduler.step()
             self.step += 1
         # Save the last checkpoint if it wasn't already saved.
-        if (self.step - 1) % self.save_interval != 0:
-            self.save(self.task_id)
+        if not self.skip_save:
+            if (self.step - 1) % self.save_interval != 0:
+                self.save(self.task_id)
         if (self.step - 1) % self.plot_interval != 0:
             self.plot(self.task_id, self.step)
 
@@ -289,26 +292,47 @@ class TrainLoop:
         dist.barrier()
 
     @th.no_grad()
-    def plot(self, task_id, step, num_exammples=16):
+    def generate_examples_specific_task(self, task_id, n_examples):
         model = self.mp_trainer.model
         model.eval()
         model_kwargs = {}
-        if self.class_cond:
-            classes = th.tensor((list(range(self.max_class+1))*(num_exammples))[:num_exammples], device=dist_util.dev())
-            # classes = th.randint(
-            #     low=0, high=4, size=(num_exammples,), device=dist_util.dev()
-            # )
-            model_kwargs["y"] = classes
+        if self.class_cond:         ### @TODO add option for class conditioning not task conditioning
+            tasks = th.tensor(([task_id] * n_examples), device=dist_util.dev())
+            model_kwargs["y"] = tasks
         sample_fn = (
             self.diffusion.p_sample_loop  # if not self.use_ddim else diffusion.ddim_sample_loop
         )
         sample = sample_fn(
             model,
-            (num_exammples, self.in_channels, self.image_size, self.image_size),
+            (n_examples, self.in_channels, self.image_size, self.image_size),
             clip_denoised=False, model_kwargs=model_kwargs,
         )
+        model.train()
+        return sample
 
-        samples_grid = make_grid(sample.detach().cpu(), 4, normalize=True).permute(1, 2, 0)
+    @th.no_grad()
+    def generate_examples(self, max_task_id, n_examples_per_task):
+        model = self.mp_trainer.model
+        model.eval()
+        model_kwargs = {}
+        if self.class_cond:         ### @TODO add option for class conditioning not task conditioning
+            tasks = th.tensor((list(range(max_task_id + 1)) * (n_examples_per_task)), device=dist_util.dev()).sort()[0]
+            model_kwargs["y"] = tasks
+        sample_fn = (
+            self.diffusion.p_sample_loop  # if not self.use_ddim else diffusion.ddim_sample_loop
+        )
+        sample = sample_fn(
+            model,
+            (n_examples_per_task * (max_task_id + 1), self.in_channels, self.image_size, self.image_size),
+            clip_denoised=False, model_kwargs=model_kwargs,
+        )
+        model.train()
+        return sample, tasks
+
+    @th.no_grad()
+    def plot(self, task_id, step, num_exammples=4):
+        sample, _ = self.generate_examples(task_id, num_exammples)
+        samples_grid = make_grid(sample.detach().cpu(), num_exammples, normalize=True).permute(1, 2, 0)
         sample_wandb = wandb.Image(samples_grid.permute(2, 0, 1), caption=f"sample_task_{task_id}")
         wandb.log({"sampled_images": sample_wandb})
 
@@ -318,8 +342,6 @@ class TrainLoop:
             os.makedirs(os.path.join(logger.get_dir(), f"samples/"))
         out_plot = os.path.join(logger.get_dir(), f"samples/task_{task_id:02d}_step_{step:06d}")
         plt.savefig(out_plot)
-
-        model.train()
 
 
 def parse_resume_step_from_filename(filename):

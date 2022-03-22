@@ -1,9 +1,16 @@
 import argparse
 import inspect
 
+import PIL
+import matplotlib
+import wandb
+from matplotlib.gridspec import GridSpec
+import matplotlib.pyplot as plt
+
 from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import SuperResModel, UNetModel, EncoderUNetModel
+import numpy as np
 
 NUM_CLASSES = 1000
 
@@ -458,3 +465,52 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError("boolean value expected")
+
+
+
+def dict2array(results):
+    tasks = len(results[0])
+    array = np.zeros((tasks, tasks))
+    for e, (key, val) in enumerate(reversed(results.items())):
+        for e1, (k, v) in enumerate(reversed(val.items())):
+            array[tasks - int(e1) - 1, tasks - int(e) - 1] = round(v, 3)
+    return np.transpose(array, axes=(1, 0))
+
+
+def grid_plot(ax, array, type):
+    if type == "fid":
+        round = 1
+    else:
+        round = 2
+    avg_array = np.around(array, round)
+    num_tasks = array.shape[1]
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list("", ["#287233", "#4c1c24"])
+    ax.imshow(avg_array, vmin=50, vmax=300, cmap=cmap)
+    for i in range(len(avg_array)):
+        for j in range(avg_array.shape[1]):
+            if j >= i:
+                ax.text(j, i, avg_array[i, j], va='center', ha='center', c='w', fontsize=70 / num_tasks)
+    ax.set_yticks(np.arange(num_tasks))
+    ax.set_ylabel('Number of tasks')
+    ax.set_xticks(np.arange(num_tasks))
+    ax.set_xlabel('Tasks finished')
+    ax.set_title(
+        f"{type} -- {np.round(np.mean(array[:, -1]), 3)} -- std {np.round(np.std(array[:, -1]), 2)}")
+
+def results_to_log(fid_table, prec_table, rec_table):
+    arr_fid = dict2array(fid_table)
+    arr_prec = dict2array(prec_table)
+    arr_rec = dict2array(rec_table)
+    fig = plt.figure(figsize=(15, 5))
+    fig.tight_layout()
+    gs = GridSpec(1, 3)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax3 = fig.add_subplot(gs[0, 2])
+    grid_plot(ax1, arr_fid, "fid")
+    grid_plot(ax2, arr_prec, "precision")
+    grid_plot(ax3, arr_rec, "recall")
+    plt.axis('off')
+    wandb.log({"fid_prec_rec_plot": plt})
+    #return PIL.Image.frombytes('RGB', fig.canvas.get_width_height(),fig.canvas.tostring_rgb())
+

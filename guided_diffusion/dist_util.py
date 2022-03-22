@@ -16,6 +16,7 @@ import torch.distributed as dist
 GPUS_PER_NODE = 2
 
 SETUP_RETRY_COUNT = 3
+GPU_ID = ""
 
 
 def setup_dist(args):
@@ -23,8 +24,10 @@ def setup_dist(args):
     Setup a distributed process group.
     """
     if args.gpu_id!=-2:
+        global GPU_ID
+        GPU_ID = f":{args.gpu_id}"
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
+        # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
 
     if dist.is_initialized():
         return
@@ -50,8 +53,9 @@ def dev():
     """
     Get the device to use for torch.distributed.
     """
+    global GPU_ID
     if th.cuda.is_available():
-        return th.device(f"cuda")
+        return th.device(f"cuda{GPU_ID}")
     return th.device("cpu")
 
 

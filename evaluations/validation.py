@@ -3,8 +3,8 @@ import os
 import torch
 import numpy as np
 
-from fid import calculate_frechet_distance
-from prd import compute_prd_from_embedding, prd_to_max_f_beta_pair
+from evaluations.fid import calculate_frechet_distance
+from evaluations.prd import compute_prd_from_embedding, prd_to_max_f_beta_pair
 # from vae_utils import generate_images
 from scipy.stats import wasserstein_distance
 
@@ -20,18 +20,18 @@ class Validator:
         print("Preparing validator")
         if dataset in ["MNIST", "Omniglot"]:  # , "DoubleMNIST"]:
             if dataset in ["Omniglot"]:
-                from evaluation_models.lenet_Omniglot import Model
+                from evaluations.evaluation_models.lenet_Omniglot import Model
             else:
-                from evaluation_models.lenet import Model
+                from evaluations.evaluation_models.lenet import Model
             net = Model()
-            model_path = "evaluation_models/lenet_" + dataset
+            model_path = "evaluations/evaluation_models/lenet_" + dataset
             net.load_state_dict(torch.load(model_path))
             net.to(device)
             net.eval()
             self.dims = 128 if dataset in ["Omniglot", "DoubleMNIST"] else 84  # 128
             self.score_model_func = net.part_forward
         elif dataset.lower() in ["celeba", "doublemnist", "fashionmnist", "flowers", "cern", "cifar10"]:
-            from evaluation_models.inception import InceptionV3
+            from evaluations.evaluation_models.inception import InceptionV3
             self.dims = 2048
             block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[self.dims]
             model = InceptionV3([block_idx])

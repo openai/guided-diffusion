@@ -296,7 +296,7 @@ class TrainLoop:
         model = self.mp_trainer.model
         model.eval()
         model_kwargs = {}
-        if self.class_cond:         ### @TODO add option for class conditioning not task conditioning
+        if self.class_cond:  ### @TODO add option for class conditioning not task conditioning
             tasks = th.tensor(([task_id] * n_examples), device=dist_util.dev())
             model_kwargs["y"] = tasks
         sample_fn = (
@@ -311,23 +311,35 @@ class TrainLoop:
         return sample
 
     @th.no_grad()
-    def generate_examples(self, max_task_id, n_examples_per_task):
+    def generate_examples(self, max_task_id, n_examples_per_task, batch_size=-1):
+        total_num_exapmles = n_examples_per_task * (max_task_id + 1)
+        if batch_size == -1:
+            batch_size = total_num_exapmles
         model = self.mp_trainer.model
         model.eval()
+        all_images = []
         model_kwargs = {}
-        if self.class_cond:         ### @TODO add option for class conditioning not task conditioning
+        if self.class_cond:  ### @TODO add option for class conditioning not task conditioning
             tasks = th.tensor((list(range(max_task_id + 1)) * (n_examples_per_task)), device=dist_util.dev()).sort()[0]
-            model_kwargs["y"] = tasks
-        sample_fn = (
-            self.diffusion.p_sample_loop  # if not self.use_ddim else diffusion.ddim_sample_loop
-        )
-        sample = sample_fn(
-            model,
-            (n_examples_per_task * (max_task_id + 1), self.in_channels, self.image_size, self.image_size),
-            clip_denoised=False, model_kwargs=model_kwargs,
-        )
+        i = 0
+        while len(all_images) < total_num_exapmles:
+
+            num_examples_to_generate = min(batch_size, total_num_exapmles - len(all_images))
+            if self.class_cond:
+                model_kwargs["y"] = tasks[i * batch_size:i * batch_size + num_examples_to_generate]
+            sample_fn = (
+                self.diffusion.p_sample_loop  # if not self.use_ddim else diffusion.ddim_sample_loop
+            )
+            sample = sample_fn(
+                model,
+                (num_examples_to_generate, self.in_channels, self.image_size, self.image_size),
+                clip_denoised=False, model_kwargs=model_kwargs,
+            )
+            all_images.extend(sample.cpu())
+        i += 1
         model.train()
-        return sample, tasks
+        all_images = th.stack(all_images, 0)
+        return all_images, tasks
 
     @th.no_grad()
     def plot(self, task_id, step, num_exammples=4):

@@ -46,11 +46,11 @@ class AppendName(data.Dataset):
     """
     A dataset wrapper that also return the name of the dataset/task
     """
-    def __init__(self, dataset, task_id, return_classes=False, return_task_as_class=False, first_class_ind=0):
+    def __init__(self, dataset, task_ids, return_classes=False, return_task_as_class=False, first_class_ind=0):
         super(AppendName,self).__init__()
         self.dataset = dataset
         self.first_class_ind = first_class_ind
-        self.task_id = task_id # For remapping the class index
+        self.task_ids = task_ids # For remapping the class index
         self.return_classes = return_classes
         self.return_task_as_class = return_task_as_class
 
@@ -62,7 +62,7 @@ class AppendName(data.Dataset):
         target = target + self.first_class_ind
         out_dict = {}
         if self.return_task_as_class:
-            out_dict["y"] = np.array(self.task_id, dtype=np.int64)
+            out_dict["y"] = np.array(self.task_ids[index]) #np.array(self.task_id, dtype=np.int64)
         elif self.return_classes:
             out_dict["y"] = np.array(target, dtype=np.int64)
         return img, out_dict #target #, self.name

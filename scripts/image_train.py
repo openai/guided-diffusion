@@ -25,8 +25,6 @@ import wandb
 
 import torch
 
-print("Is CUDA available:", torch.cuda.is_available())
-
 
 # os.environ["WANDB_MODE"] = "disabled"
 
@@ -107,9 +105,29 @@ def main():
     precision_table = OrderedDict()
     recall_table = OrderedDict()
     for task_id in range(args.num_tasks):
-        train_dataset_loader = data.DataLoader(dataset=train_dataset_splits[task_id],
-                                               batch_size=args.batch_size, shuffle=True,
-                                               drop_last=True)
+        if task_id == 0:
+            train_dataset_loader = data.DataLoader(dataset=train_dataset_splits[task_id],
+                                                   batch_size=args.batch_size, shuffle=True,
+                                                   drop_last=True)
+            dataset_yielder = yielder(train_dataset_loader)
+        else:
+            print("Preparing dataset for rehearsal...")
+            if args.n_generated_examples_per_task <= args.batch_size:
+                batch_size = args.n_generated_examples_per_task
+            else:
+                batch_size = args.batch_size
+            generated_previous_examples, generated_previous_examples_tasks = train_loop.generate_examples(task_id - 1,
+                                                                                                          args.n_generated_examples_per_task,
+                                                                                                          batch_size=batch_size)
+            generated_dataset = AppendName(
+                data.TensorDataset(generated_previous_examples, generated_previous_examples_tasks),
+                generated_previous_examples_tasks.cpu().numpy(), args.class_cond, args.use_task_index)
+            joined_dataset = data.ConcatDataset([train_dataset_splits[task_id], generated_dataset])
+            train_dataset_loader = data.DataLoader(dataset=joined_dataset,
+                                                   batch_size=args.batch_size, shuffle=True,
+                                                   drop_last=True)
+            dataset_yielder = yielder(train_dataset_loader)
+            print("Done")
 
         if args.class_cond:
             if args.use_task_index:
@@ -126,14 +144,14 @@ def main():
             model=model,
             diffusion=diffusion,
             task_id=task_id,
-            data=yielder(train_dataset_loader),
+            data=dataset_yielder,
             batch_size=args.batch_size,
             microbatch=args.microbatch,
             lr=args.lr,
             scheduler_rate=args.scheduler_rate,
             ema_rate=args.ema_rate,
             log_interval=args.log_interval,
-            skip_save = args.skip_save,
+            skip_save=args.skip_save,
             save_interval=args.save_interval,
             plot_interval=args.plot_interval,
             resume_checkpoint=args.resume_checkpoint,
@@ -155,6 +173,8 @@ def main():
         if args.skip_validation:
             for j in range(task_id + 1):
                 fid_table[j][task_id] = -1
+                precision_table[j][task_id] = -1
+                recall_table[j][task_id] = -1
         else:
             print("Validation")
             for j in range(task_id + 1):
@@ -166,9 +186,7 @@ def main():
                 precision_table[j][task_id] = precision
                 recall_table[j][task_id] = recall
                 print(f"FID task {j}: {fid_result}")
-        results_to_log(fid_table, precision_table, recall_table)
-        # results_wandb = wandb.Image(results_image, caption=f"fid_prec_rec_{task_id}")
-        # wandb.log({"results_matrices": results_wandb})
+            results_to_log(fid_table, precision_table, recall_table)
     print(fid_table)
 
 
@@ -205,7 +223,8 @@ def create_argparser():
         scheduler_rate=1.0,
         use_task_index=True,
         skip_validation=False,
-        n_examples_validation=128
+        n_examples_validation=128,
+        n_generated_examples_per_task=1000
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

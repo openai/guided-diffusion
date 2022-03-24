@@ -7,7 +7,8 @@ from torch.utils.data import Subset
 from .wrapper import Subclass, AppendName, Permutation
 
 
-def data_split(dataset, dataset_name, return_classes=False, return_task_as_class=False, num_batches=5, num_classes=10, random_split=False,
+def data_split(dataset, dataset_name, return_classes=False, return_task_as_class=False, num_batches=5, num_classes=10,
+               random_split=False,
                limit_data=None, dirichlet_split_alpha=None, dirichlet_equal_split=True, reverse=False,
                limit_classes=-1):
     if limit_classes > 0:
@@ -40,7 +41,7 @@ def data_split(dataset, dataset_name, return_classes=False, return_task_as_class
     if dataset_name.lower() == "flowers":
         import pickle
         # if num_batches == 10:
-        with open("data/flower_data/grouping_10.pkl","rb") as file:
+        with open("data/flower_data/grouping_10.pkl", "rb") as file:
             class_split = pickle.load(file)
         num_classes = 10
         # else:
@@ -159,8 +160,10 @@ def data_split(dataset, dataset_name, return_classes=False, return_task_as_class
         val_subset.class_list = batch_split[name]
         # val_subset.attr = val_subset.labels
 
-        train_dataset_splits[name] = AppendName(train_subset, name, return_classes=return_classes, return_task_as_class=return_task_as_class)
-        val_dataset_splits[name] = AppendName(val_subset, name, return_classes=return_classes, return_task_as_class=return_task_as_class)
+        train_dataset_splits[name] = AppendName(train_subset, [name] * len(train_subset), return_classes=return_classes,
+                                                return_task_as_class=return_task_as_class)
+        val_dataset_splits[name] = AppendName(val_subset, [name] * len(train_subset), return_classes=return_classes,
+                                              return_task_as_class=return_task_as_class)
         task_output_space[name] = (batch_indices[:, name] == 1).sum()
     if dirichlet_split_alpha != None:
         print("Created dataset with class split:")

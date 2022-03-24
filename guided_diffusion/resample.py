@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import torch as th
 import torch.distributed as dist
+import wandb
 
 
 def create_named_schedule_sampler(name, diffusion):
@@ -14,6 +15,8 @@ def create_named_schedule_sampler(name, diffusion):
     """
     if name == "uniform":
         return UniformSampler(diffusion)
+    elif name == "beta":
+        return BetaSampler(diffusion)
     elif name == "loss-second-moment":
         return LossSecondMomentResampler(diffusion)
     else:
@@ -50,6 +53,7 @@ class ScheduleSampler(ABC):
                  - weights: a tensor of weights to scale the resulting losses.
         """
         w = self.weights()
+        # wandb.log({f"w_{i}":w[i] for i in range(len(w))})
         p = w / np.sum(w)
         indices_np = np.random.choice(len(p), size=(batch_size,), p=p)
         indices = th.from_numpy(indices_np).long().to(device)
@@ -62,6 +66,17 @@ class UniformSampler(ScheduleSampler):
     def __init__(self, diffusion):
         self.diffusion = diffusion
         self._weights = np.ones([diffusion.num_timesteps])
+
+    def weights(self):
+        return self._weights
+
+
+class BetaSampler(ScheduleSampler):
+    def __init__(self, diffusion, alfa=4, beta=1.2):
+        beta_dist = th.distributions.beta.Beta(alfa, beta)
+        w = th.exp(beta_dist.log_prob((th.arange(0, diffusion.num_timesteps) / diffusion.num_timesteps)))
+        self.diffusion = diffusion
+        self._weights = w.numpy() + 1  # np.ones([diffusion.num_timesteps])
 
     def weights(self):
         return self._weights

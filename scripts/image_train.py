@@ -62,6 +62,7 @@ def main():
     else:
         n_classes = train_dataset.number_classes
 
+    args.num_classes = args.num_tasks#n_classes
     logger.log("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())

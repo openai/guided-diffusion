@@ -223,7 +223,7 @@ class TrainLoop:
                 for k, v in cond.items()
             }
             last_batch = (i + self.microbatch) >= batch.shape[0]
-            t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
+            t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())  # @TODO Sample based on task
 
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
@@ -336,7 +336,7 @@ class TrainLoop:
                 clip_denoised=False, model_kwargs=model_kwargs,
             )
             all_images.extend(sample.cpu())
-        i += 1
+            i += 1
         model.train()
         all_images = th.stack(all_images, 0)
         return all_images, tasks

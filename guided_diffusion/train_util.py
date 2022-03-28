@@ -15,7 +15,7 @@ from PIL import Image
 from . import dist_util, logger
 from .fp16_util import MixedPrecisionTrainer
 from .nn import update_ema
-from .resample import LossAwareSampler, UniformSampler
+from .resample import LossAwareSampler, UniformSampler, TaskAwareSampler
 
 import wandb
 
@@ -30,6 +30,7 @@ class TrainLoop:
     def __init__(
             self,
             *,
+            params,
             model,
             diffusion,
             data,
@@ -56,6 +57,7 @@ class TrainLoop:
             class_cond=False,
             max_class=None,
     ):
+        self.params = params
         self.task_id = task_id
         self.model = model
         self.diffusion = diffusion
@@ -223,7 +225,10 @@ class TrainLoop:
                 for k, v in cond.items()
             }
             last_batch = (i + self.microbatch) >= batch.shape[0]
-            t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())  # @TODO Sample based on task
+            if isinstance(self.schedule_sampler, TaskAwareSampler):
+                t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev(), micro_cond["y"], self.task_id)
+            else:
+                t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
 
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
@@ -291,28 +296,13 @@ class TrainLoop:
 
         dist.barrier()
 
-    @th.no_grad()
-    def generate_examples_specific_task(self, task_id, n_examples):
-        model = self.mp_trainer.model
-        model.eval()
-        model_kwargs = {}
-        if self.class_cond:  ### @TODO add option for class conditioning not task conditioning
-            tasks = th.tensor(([task_id] * n_examples), device=dist_util.dev())
-            model_kwargs["y"] = tasks
-        sample_fn = (
-            self.diffusion.p_sample_loop  # if not self.use_ddim else diffusion.ddim_sample_loop
-        )
-        sample = sample_fn(
-            model,
-            (n_examples, self.in_channels, self.image_size, self.image_size),
-            clip_denoised=False, model_kwargs=model_kwargs,
-        )
-        model.train()
-        return sample
 
     @th.no_grad()
-    def generate_examples(self, max_task_id, n_examples_per_task, batch_size=-1):
-        total_num_exapmles = n_examples_per_task * (max_task_id + 1)
+    def generate_examples(self, task_id, n_examples_per_task, batch_size=-1, only_one_task=False):
+        if not only_one_task:
+            total_num_exapmles = n_examples_per_task * (task_id + 1)
+        else:
+            total_num_exapmles = n_examples_per_task
         if batch_size == -1:
             batch_size = total_num_exapmles
         model = self.mp_trainer.model
@@ -320,7 +310,10 @@ class TrainLoop:
         all_images = []
         model_kwargs = {}
         if self.class_cond:  ### @TODO add option for class conditioning not task conditioning
-            tasks = th.tensor((list(range(max_task_id + 1)) * (n_examples_per_task)), device=dist_util.dev()).sort()[0]
+            if only_one_task:
+                tasks = th.zeros(n_examples_per_task, device=dist_util.dev()) + task_id
+            else:
+                tasks = th.tensor((list(range(task_id + 1)) * (n_examples_per_task)), device=dist_util.dev()).sort()[0]
         i = 0
         while len(all_images) < total_num_exapmles:
 

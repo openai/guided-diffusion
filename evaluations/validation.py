@@ -40,8 +40,9 @@ class Validator:
             model.eval()
             self.score_model_func = lambda batch: model(batch)[0]
         self.stats_file_name = f"{stats_file_name}_dims_{self.dims}"
+
     @torch.no_grad()
-    def calculate_results(self, train_loop, task_id, n_generated_examples, dataset=None):
+    def calculate_results(self, train_loop, task_id, n_generated_examples, dataset=None, batch_size=128):
         test_loader = self.dataloaders[task_id]
         distribution_orig = []
         distribution_gen = []
@@ -64,7 +65,9 @@ class Validator:
                 if dataset.lower() in ["fashionmnist", "doublemnist"]:
                     x = x.repeat([1, 3, 1, 1])
                 distribution_orig.append(self.score_model_func(x).cpu().detach().numpy())
-        example = train_loop.generate_examples_specific_task(task_id=task_id,n_examples=n_generated_examples)
+        example, _ = train_loop.generate_examples(task_id=task_id, n_examples_per_task=n_generated_examples, only_one_task=True,
+                                                  batch_size=batch_size)
+        example = example.to(self.device)
         if dataset.lower() in ["fashionmnist", "doublemnist"]:
             example = example.repeat([1, 3, 1, 1])
         distribution_gen = self.score_model_func(example).cpu().numpy().reshape(-1, self.dims)
@@ -86,7 +89,7 @@ class Validator:
 
 class CERN_Validator:
     def __init__(self, dataloaders, stats_file_name, device):
-        raise NotImplementedError() #Adjust
+        raise NotImplementedError()  # Adjust
         self.dataloaders = dataloaders
         self.stats_file_name = stats_file_name
         self.device = device
@@ -125,7 +128,7 @@ class CERN_Validator:
         return np.stack([ch1, ch2, ch3, ch4, ch5])
 
     def calculate_results(self, curr_global_decoder, class_table, task_id, translate_noise=True, starting_point=None,
-                         sample_tasks=False, dataset=None):
+                          sample_tasks=False, dataset=None):
         curr_global_decoder.eval()
         class_table = class_table[:task_id + 1]
         test_loader = self.dataloaders[task_id]

@@ -138,10 +138,12 @@ def main():
         else:
             max_class = None
         logger.log("training...")
-        num_steps = args.num_steps
         if task_id == 0:
-            num_steps = num_steps
+            num_steps = args.first_task_num_steps
+        else:
+            num_steps = args.num_steps
         train_loop = TrainLoop(
+            params=args,
             model=model,
             diffusion=diffusion,
             task_id=task_id,
@@ -205,7 +207,7 @@ def create_argparser():
         batch_size=32,
         microbatch=-1,  # -1 disables microbatches
         ema_rate="0.9999",  # comma-separated list of EMA values
-        log_interval=10,
+        log_interval=50,
         skip_save=False,
         save_interval=5000,
         plot_interval=1000,
@@ -225,7 +227,8 @@ def create_argparser():
         use_task_index=True,
         skip_validation=False,
         n_examples_validation=128,
-        n_generated_examples_per_task=1000
+        n_generated_examples_per_task=1000,
+        first_task_num_steps=5000
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

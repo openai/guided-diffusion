@@ -19,6 +19,8 @@ def create_named_schedule_sampler(name, diffusion):
         return BetaSampler(diffusion)
     elif name == "loss-second-moment":
         return LossSecondMomentResampler(diffusion)
+    elif name == "task_aware":
+        return TaskAwareSampler(diffusion)
     else:
         raise NotImplementedError(f"unknown schedule sampler: {name}")
 
@@ -69,6 +71,26 @@ class UniformSampler(ScheduleSampler):
 
     def weights(self):
         return self._weights
+
+
+class TaskAwareSampler:
+    def __init__(self, diffusion, alfa=4, beta=1.2):
+        self.diffusion = diffusion
+        self.beta_sampler = BetaSampler(diffusion, alfa, beta)
+        self.uniform_sampler = UniformSampler(diffusion)
+
+    def sample(self, batch_size, device, task_ids, current_task_id):
+        curr_task_indices, curr_task_weights = self.uniform_sampler.sample((task_ids == current_task_id).sum().item(),device)
+        prev_task_indices, prev_task_weights = self.beta_sampler.sample((task_ids != current_task_id).sum().item(),device)
+        indices = th.zeros(batch_size, device=device).long()
+        weights = th.zeros(batch_size, device=device).float()
+
+        indices[task_ids == current_task_id] = curr_task_indices
+        indices[task_ids != current_task_id] = prev_task_indices
+
+        weights[task_ids == current_task_id] = curr_task_weights
+        weights[task_ids != current_task_id] = prev_task_weights
+        return indices, weights
 
 
 class BetaSampler(ScheduleSampler):

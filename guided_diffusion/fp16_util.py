@@ -153,10 +153,12 @@ class MixedPrecisionTrainer:
         use_fp16=False,
         fp16_scale_growth=1e-3,
         initial_lg_loss_scale=INITIAL_LOG_LOSS_SCALE,
+        skip_gradient_thr=-1,
     ):
         self.model = model
         self.use_fp16 = use_fp16
         self.fp16_scale_growth = fp16_scale_growth
+        self.skip_gradient_thr = skip_gradient_thr
 
         self.model_params = list(self.model.parameters())
         self.master_params = self.model_params
@@ -200,18 +202,31 @@ class MixedPrecisionTrainer:
         logger.logkv_mean("param_norm", param_norm)
 
         self.master_params[0].grad.mul_(1.0 / (2 ** self.lg_loss_scale))
-        opt.step()
+        # TODO: add skip gradients here
+        if self.skip_gradient_thr == -1. or grad_norm < self.skip_gradient_thr:
+            logger.logkv_mean("skip_update", 0)
+            opt.step()
+            step_made = True
+        else:
+            logger.logkv_mean("skip_update", 1)
+            step_made = False
         zero_master_grads(self.master_params)
         master_params_to_model_params(self.param_groups_and_shapes, self.master_params)
         self.lg_loss_scale += self.fp16_scale_growth
-        return True
+        return step_made
 
     def _optimize_normal(self, opt: th.optim.Optimizer):
         grad_norm, param_norm = self._compute_norms()
         logger.logkv_mean("grad_norm", grad_norm)
         logger.logkv_mean("param_norm", param_norm)
-        opt.step()
-        return True
+        # TODO: add skip gradients here
+        if self.skip_gradient_thr == -1. or grad_norm < self.skip_gradient_thr:
+            logger.logkv_mean("skip_update", 0)
+            opt.step()
+            return True
+        else:
+            logger.logkv_mean("skip_update", 1)
+            return False
 
     def _compute_norms(self, grad_scale=1.0):
         grad_norm = 0.0

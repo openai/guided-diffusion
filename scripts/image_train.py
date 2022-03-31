@@ -228,7 +228,8 @@ def create_argparser():
         skip_validation=False,
         n_examples_validation=128,
         n_generated_examples_per_task=1000,
-        first_task_num_steps=5000
+        first_task_num_steps=5000,
+        skip_gradient_thr=-1,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

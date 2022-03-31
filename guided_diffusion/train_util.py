@@ -96,7 +96,7 @@ class TrainLoop:
         self.mp_trainer = MixedPrecisionTrainer(
             model=self.model,
             use_fp16=self.use_fp16,
-            fp16_scale_growth=fp16_scale_growth,
+            fp16_scale_growth=fp16_scale_growth
         )
 
         self.opt = AdamW(
@@ -184,6 +184,8 @@ class TrainLoop:
                 (not self.lr_anneal_steps
                  or self.step + self.resume_step < self.lr_anneal_steps) and (self.step < self.num_steps)
         ):
+            if self.step > 100:
+                self.mp_trainer.skip_gradient_thr = self.params.skip_gradient_thr
             batch, cond = next(self.data)
             self.run_step(batch, cond)
             if self.step % self.log_interval == 0:

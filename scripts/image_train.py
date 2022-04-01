@@ -3,6 +3,7 @@ Train a diffusion model on images.
 """
 
 import argparse
+import copy
 from collections import OrderedDict
 
 from dataloaders import base
@@ -111,6 +112,11 @@ def main():
                                                    batch_size=args.batch_size, shuffle=True,
                                                    drop_last=True)
             dataset_yielder = yielder(train_dataset_loader)
+        elif not args.generate_previous_examples_at_start_of_new_task:
+            train_dataset_loader = data.DataLoader(dataset=train_dataset_splits[task_id],
+                                                   batch_size=args.batch_size//(task_id + 1), shuffle=True,
+                                                   drop_last=True)
+            dataset_yielder = yielder(train_dataset_loader)
         else:
             print("Preparing dataset for rehearsal...")
             if args.n_generated_examples_per_task <= args.batch_size:
@@ -145,6 +151,7 @@ def main():
         train_loop = TrainLoop(
             params=args,
             model=model,
+            prev_model=copy.deepcopy(model),
             diffusion=diffusion,
             task_id=task_id,
             data=dataset_yielder,
@@ -167,7 +174,9 @@ def main():
             image_size=args.image_size,
             in_channels=args.in_channels,
             class_cond=args.class_cond,
-            max_class=max_class
+            max_class=max_class,
+            generate_previous_examples_at_start_of_new_task=args.generate_previous_examples_at_start_of_new_task,
+            generate_previous_samples_continuously=args.generate_previous_samples_continuously
         )
         train_loop.run_loop()
         fid_table[task_id] = OrderedDict()
@@ -230,6 +239,8 @@ def create_argparser():
         n_generated_examples_per_task=1000,
         first_task_num_steps=5000,
         skip_gradient_thr=-1,
+        generate_previous_examples_at_start_of_new_task=False,
+        generate_previous_samples_continuously=True
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

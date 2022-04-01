@@ -32,6 +32,7 @@ class TrainLoop:
             *,
             params,
             model,
+            prev_model,
             diffusion,
             data,
             batch_size,
@@ -56,10 +57,13 @@ class TrainLoop:
             in_channels=3,
             class_cond=False,
             max_class=None,
+            generate_previous_examples_at_start_of_new_task=False,
+            generate_previous_samples_continuously=False
     ):
         self.params = params
         self.task_id = task_id
         self.model = model
+        self.prev_ddp_model = prev_model
         self.diffusion = diffusion
         self.data = data
         self.image_size = image_size
@@ -135,6 +139,8 @@ class TrainLoop:
                 )
             self.use_ddp = False
             self.ddp_model = self.model
+        self.generate_previous_examples_at_start_of_new_task = generate_previous_examples_at_start_of_new_task
+        self.generate_previous_samples_continuously = generate_previous_samples_continuously
 
     def _load_and_sync_parameters(self):
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
@@ -228,9 +234,21 @@ class TrainLoop:
             }
             last_batch = (i + self.microbatch) >= batch.shape[0]
             if isinstance(self.schedule_sampler, TaskAwareSampler):
-                t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev(), micro_cond["y"], self.task_id)
+                t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev(), micro_cond["y"],
+                                                          self.task_id)
             else:
                 t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
+
+            if self.generate_previous_samples_continuously and (self.task_id > 0):
+                shape = [self.batch_size, self.in_channels, self.image_size, self.image_size]
+                prev_loss = self.diffusion.calculate_loss_previous_task(current_model=self.ddp_model,
+                                                                        prev_model=self.prev_ddp_model, #@TODO Check with frozen copy of a model
+                                                                        schedule_sampler= self.schedule_sampler,
+                                                                        task_id=self.task_id,
+                                                                        n_examples_per_task=self.batch_size,
+                                                                        shape=shape)
+            else:
+                prev_loss = 0
 
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
@@ -251,7 +269,8 @@ class TrainLoop:
                     t, losses["loss"].detach()
                 )
 
-            loss = (losses["loss"] * weights).mean()
+            loss = (losses["loss"] * weights).mean() + prev_loss
+            losses["prev_kl"] = prev_loss
             log_loss_dict(
                 self.diffusion, t, {k: v * weights for k, v in losses.items()}
             )
@@ -297,7 +316,6 @@ class TrainLoop:
                 th.save(self.opt.state_dict(), f)
 
         dist.barrier()
-
 
     @th.no_grad()
     def generate_examples(self, task_id, n_examples_per_task, batch_size=-1, only_one_task=False):
@@ -391,7 +409,8 @@ def find_ema_checkpoint(main_checkpoint, step, rate):
 def log_loss_dict(diffusion, ts, losses):
     for key, values in losses.items():
         logger.logkv_mean(key, values.mean().item())
-        # Log the quantiles (four quartiles, in particular).
-        for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
-            quartile = int(4 * sub_t / diffusion.num_timesteps)
-            logger.logkv_mean(f"{key}_q{quartile}", sub_loss)
+        if key!="prev_kl":
+            # Log the quantiles (four quartiles, in particular).
+            for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
+                quartile = int(4 * sub_t / diffusion.num_timesteps)
+                logger.logkv_mean(f"{key}_q{quartile}", sub_loss)

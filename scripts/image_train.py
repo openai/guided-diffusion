@@ -71,7 +71,7 @@ def main():
     if not os.environ.get("WANDB_MODE") == "disabled":
         wandb.watch(model, log_freq=10)
     model.to(dist_util.dev())
-    schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
+    schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion, args)
 
     logger.log("creating data loader...")
 
@@ -210,6 +210,8 @@ def create_argparser():
         dataroot="data/",
         dataset="MNIST",
         schedule_sampler="uniform",
+        alpha=4,
+        beta=1.2,
         lr=1e-4,
         weight_decay=0.0,
         lr_anneal_steps=0,

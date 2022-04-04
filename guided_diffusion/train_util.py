@@ -129,7 +129,7 @@ class TrainLoop:
                 output_device=dist_util.dev(),
                 broadcast_buffers=False,
                 bucket_cap_mb=128,
-                find_unused_parameters=False,
+                find_unused_parameters=True,
             )
         else:
             if dist.get_world_size() > 1:
@@ -242,7 +242,7 @@ class TrainLoop:
             if self.generate_previous_samples_continuously and (self.task_id > 0):
                 shape = [self.batch_size, self.in_channels, self.image_size, self.image_size]
                 prev_loss = self.diffusion.calculate_loss_previous_task(current_model=self.ddp_model,
-                                                                        prev_model=self.prev_ddp_model, #@TODO Check with frozen copy of a model
+                                                                        prev_model=self.prev_ddp_model, #Frozen copy of the model
                                                                         schedule_sampler= self.schedule_sampler,
                                                                         task_id=self.task_id,
                                                                         n_examples_per_task=self.batch_size,

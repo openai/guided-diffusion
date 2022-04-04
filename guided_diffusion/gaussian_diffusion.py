@@ -708,18 +708,6 @@ class GaussianDiffusion:
                 yield out
                 img = out["sample"]
 
-    def prev_task_vb_term(self, t, model, model_prev, ):
-        true_mean, _, true_log_variance_clipped = self.q_posterior_mean_variance(
-            x_start=x_start, x_t=x_t, t=t
-        )
-        out = self.p_mean_variance(
-            model, x_t, t, clip_denoised=clip_denoised, model_kwargs=model_kwargs
-        )
-        kl = normal_kl(
-            true_mean, true_log_variance_clipped, out["mean"], out["log_variance"]
-        )
-        kl = mean_flat(kl) / np.log(2.0)
-
     def _vb_terms_bpd(
             self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None
     ):
@@ -758,17 +746,17 @@ class GaussianDiffusion:
     def partial_sample_loop(self, current_model, prev_model, schedule_sampler, task_id, n_examples_per_task, shape,
                             denoised_fn=None, clip_denoised=False, cond_fn=None, batch_size=-1):
         device = dist_util.dev()
-        total_num_exapmles = n_examples_per_task * (task_id + 1)
-        tasks = th.tensor((list(range(task_id + 1)) * (n_examples_per_task)), device=dist_util.dev()).sort()[0]
-        # if isinstance(schedule_sampler, TaskAwareSampler):
-        #     timesteps, weights = schedule_sampler.sample(total_num_exapmles, device, tasks, task_id)
-        # else:
-        #     timesteps, weights = schedule_sampler.sample(total_num_exapmles, device)
-        timesteps = th.tensor([2])
+        total_num_exapmles = n_examples_per_task * (task_id)
+        tasks = th.tensor((list(range(task_id)) * (n_examples_per_task)), device=device).sort()[0]
+        if isinstance(schedule_sampler, TaskAwareSampler):
+            timesteps, _ = schedule_sampler.sample(total_num_exapmles, device, tasks, task_id)
+        else:
+            timesteps, _ = schedule_sampler.sample(total_num_exapmles, device)
+        min_timestep_clip = self.num_timesteps * 2.5 // 4
+        timesteps[timesteps < min_timestep_clip] = min_timestep_clip
 
         if batch_size == -1:
             batch_size = total_num_exapmles
-        # current_model.eval()
         prev_model.eval()
         all_images_pre_mean = []
         all_images_pre_variance = []
@@ -783,7 +771,10 @@ class GaussianDiffusion:
             model_kwargs["y"] = tasks[j * batch_size:j * batch_size + num_examples_to_generate]
 
             img = th.randn(*shape, device=device)
-            for i in range(3):
+            # t = th.tensor([0] * shape[0], device=device)
+            indices = list(range(timesteps.min(), self.num_timesteps))[::-1]
+            out_img = th.zeros_like(img)
+            for i in indices:
                 t = th.tensor([i] * shape[0], device=device)
                 with th.no_grad():
                     out = self.p_sample(
@@ -796,21 +787,21 @@ class GaussianDiffusion:
                         model_kwargs=model_kwargs,
                     )
                     img = out["sample"]
+                    ready_out_images = timesteps == t
+                    out_img[ready_out_images] = img[ready_out_images]
             with th.no_grad():
                 out_prev = self.p_mean_variance(
-                    prev_model, img, t, clip_denoised=clip_denoised, model_kwargs=model_kwargs
+                    prev_model, out_img, timesteps, clip_denoised=clip_denoised, model_kwargs=model_kwargs
                 )
             all_images_pre_mean.extend(out_prev["mean"])
             all_images_pre_variance.extend(out_prev["log_variance"])
             out_curr = self.p_mean_variance(
-                current_model, img, t, clip_denoised=clip_denoised, model_kwargs=model_kwargs
+                current_model, out_img, timesteps, clip_denoised=clip_denoised, model_kwargs=model_kwargs
             )
             all_images_mean.extend(out_curr["mean"])
             all_images_variance.extend(out_curr["log_variance"])
             j += 1
 
-        # current_model.train()
-        # prev_model.train()
         return th.stack(all_images_mean, 0), th.stack(all_images_variance, 0), th.stack(all_images_pre_mean,
                                                                                         0), th.stack(
             all_images_pre_variance, 0)

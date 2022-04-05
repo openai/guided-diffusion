@@ -95,10 +95,14 @@ def main():
             val_loaders.append(val_loader)
 
         stats_file_name = f"seed_{args.seed}_tasks_{args.num_tasks}_random_{args.random_split}_dirichlet_{args.dirichlet}_limit_{args.limit_data}"
+        if args.use_gpu_for_validation:
+            device_for_validation = dist_util.dev()
+        else:
+            device_for_validation = torch.device("cpu")
         if args.dataset.lower() != "cern":
             validator = Validator(n_classes=n_classes, device=dist_util.dev(), dataset=args.dataset,
                                   stats_file_name=stats_file_name,
-                                  score_model_device=dist_util.dev(), dataloaders=val_loaders)
+                                  score_model_device=device_for_validation, dataloaders=val_loaders)
         else:
             raise NotImplementedError()  # Adapt CERN validator
             # validator = CERN_Validator(dataloaders=val_loaders, stats_file_name=stats_file_name, device=dist_util.dev())
@@ -143,7 +147,7 @@ def main():
                 raise NotImplementedError()  # Classes seen so far for plotting and sampling
         else:
             max_class = None
-        logger.log("training...")
+        logger.log(f"training task {task_id}")
         if task_id == 0:
             num_steps = args.first_task_num_steps
         else:
@@ -238,6 +242,7 @@ def create_argparser():
         use_task_index=True,
         skip_validation=False,
         n_examples_validation=128,
+        use_gpu_for_validation=True,
         n_generated_examples_per_task=1000,
         first_task_num_steps=5000,
         skip_gradient_thr=-1,

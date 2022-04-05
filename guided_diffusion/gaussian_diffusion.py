@@ -769,10 +769,10 @@ class GaussianDiffusion:
             num_examples_to_generate = min(batch_size, total_num_exapmles - len(all_images_mean))
             shape[0] = num_examples_to_generate
             model_kwargs["y"] = tasks[j * batch_size:j * batch_size + num_examples_to_generate]
-
+            selected_timesteps = timesteps[j * batch_size:j * batch_size + num_examples_to_generate]
             img = th.randn(*shape, device=device)
             # t = th.tensor([0] * shape[0], device=device)
-            indices = list(range(timesteps.min(), self.num_timesteps))[::-1]
+            indices = list(range(selected_timesteps.min(), self.num_timesteps))[::-1]
             out_img = th.zeros_like(img)
             for i in indices:
                 t = th.tensor([i] * shape[0], device=device)
@@ -787,16 +787,16 @@ class GaussianDiffusion:
                         model_kwargs=model_kwargs,
                     )
                     img = out["sample"]
-                    ready_out_images = timesteps == t
+                    ready_out_images = selected_timesteps == t
                     out_img[ready_out_images] = img[ready_out_images]
             with th.no_grad():
                 out_prev = self.p_mean_variance(
-                    prev_model, out_img, timesteps, clip_denoised=clip_denoised, model_kwargs=model_kwargs
+                    prev_model, out_img, selected_timesteps, clip_denoised=clip_denoised, model_kwargs=model_kwargs
                 )
             all_images_pre_mean.extend(out_prev["mean"])
             all_images_pre_variance.extend(out_prev["log_variance"])
             out_curr = self.p_mean_variance(
-                current_model, out_img, timesteps, clip_denoised=clip_denoised, model_kwargs=model_kwargs
+                current_model, out_img, selected_timesteps, clip_denoised=clip_denoised, model_kwargs=model_kwargs
             )
             all_images_mean.extend(out_curr["mean"])
             all_images_variance.extend(out_curr["log_variance"])
@@ -824,7 +824,7 @@ class GaussianDiffusion:
         )
         kl = mean_flat(kl) / np.log(2.0)
 
-        return kl.mean()
+        return kl.sum()
 
     def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
         """

@@ -204,7 +204,7 @@ def fid_inception_v3():
     inception.Mixed_7b = FIDInceptionE_1(1280)
     inception.Mixed_7c = FIDInceptionE_2(2048)
 
-    model_path = "vae_experiments/evaluation_models/inception"
+    model_path = "evaluations/evaluation_models/inception"
     if os.path.exists(model_path):
         print("Loading cached inception model for validation")
         state_dict = torch.load(model_path)

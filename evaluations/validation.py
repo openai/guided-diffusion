@@ -13,6 +13,8 @@ class Validator:
     def __init__(self, n_classes, device, dataset, stats_file_name, dataloaders, score_model_device=None):
         self.n_classes = n_classes
         self.device = device
+        if not score_model_device:
+            score_model_device=device
         self.dataset = dataset
         self.score_model_device = score_model_device
         self.dataloaders = dataloaders
@@ -34,7 +36,7 @@ class Validator:
             from evaluations.evaluation_models.inception import InceptionV3
             self.dims = 2048
             block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[self.dims]
-            model = InceptionV3([block_idx])
+            model = InceptionV3([block_idx]).to(device)
             if score_model_device:
                 model = model.to(score_model_device)
             model.eval()
@@ -64,10 +66,10 @@ class Validator:
                 # example = generate_images(curr_global_decoder, z, bin_z, task_ids, y, translate_noise=translate_noise)
                 if dataset.lower() in ["fashionmnist", "doublemnist"]:
                     x = x.repeat([1, 3, 1, 1])
-                distribution_orig.append(self.score_model_func(x).cpu().detach().numpy())
+                distribution_orig.append(self.score_model_func(x.to(self.score_model_device)).cpu().detach().numpy())
         example, _ = train_loop.generate_examples(task_id=task_id, n_examples_per_task=n_generated_examples, only_one_task=True,
                                                   batch_size=batch_size)
-        example = example.to(self.device)
+        example = example.to(self.score_model_device)
         if dataset.lower() in ["fashionmnist", "doublemnist"]:
             example = example.repeat([1, 3, 1, 1])
         distribution_gen = self.score_model_func(example).cpu().numpy().reshape(-1, self.dims)

@@ -63,7 +63,7 @@ def main():
     else:
         n_classes = train_dataset.number_classes
 
-    args.num_classes = args.num_tasks#n_classes
+    args.num_classes = args.num_tasks  # n_classes
     logger.log("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())
@@ -118,7 +118,7 @@ def main():
             dataset_yielder = yielder(train_dataset_loader)
         elif not args.generate_previous_examples_at_start_of_new_task:
             train_dataset_loader = data.DataLoader(dataset=train_dataset_splits[task_id],
-                                                   batch_size=args.batch_size//(task_id + 1), shuffle=True,
+                                                   batch_size=args.batch_size // (task_id + 1), shuffle=True,
                                                    drop_last=True)
             dataset_yielder = yielder(train_dataset_loader)
         else:
@@ -197,7 +197,8 @@ def main():
                 fid_result, precision, recall = validator.calculate_results(train_loop=train_loop,
                                                                             task_id=j,
                                                                             dataset=args.dataset,
-                                                                            n_generated_examples=args.n_examples_validation)
+                                                                            n_generated_examples=args.n_examples_validation,
+                                                                            batch_size=args.microbatch if args.microbatch > 0 else args.batch_size)
                 fid_table[j][task_id] = fid_result
                 precision_table[j][task_id] = precision
                 recall_table[j][task_id] = recall

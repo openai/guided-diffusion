@@ -6,7 +6,7 @@ import torch.distributed as dist
 import wandb
 
 
-def create_named_schedule_sampler(name, diffusion):
+def create_named_schedule_sampler(name, diffusion, args):
     """
     Create a ScheduleSampler from a library of pre-defined samplers.
 
@@ -16,11 +16,11 @@ def create_named_schedule_sampler(name, diffusion):
     if name == "uniform":
         return UniformSampler(diffusion)
     elif name == "beta":
-        return BetaSampler(diffusion)
+        return BetaSampler(diffusion, args.alpha, args.beta)
     elif name == "loss-second-moment":
         return LossSecondMomentResampler(diffusion)
     elif name == "task_aware":
-        return TaskAwareSampler(diffusion)
+        return TaskAwareSampler(diffusion, args.alpha, args.beta)
     else:
         raise NotImplementedError(f"unknown schedule sampler: {name}")
 
@@ -76,7 +76,7 @@ class UniformSampler(ScheduleSampler):
 class TaskAwareSampler:
     def __init__(self, diffusion, alfa=4, beta=1.2):
         self.diffusion = diffusion
-        self.beta_sampler = BetaSampler(diffusion, alfa, beta)
+        self.beta_sampler = BetaSampler(diffusion, alfa, beta, weights_smoothing=0)
         self.uniform_sampler = UniformSampler(diffusion)
 
     def sample(self, batch_size, device, task_ids, current_task_id):
@@ -94,11 +94,11 @@ class TaskAwareSampler:
 
 
 class BetaSampler(ScheduleSampler):
-    def __init__(self, diffusion, alfa=4, beta=1.2):
+    def __init__(self, diffusion, alfa=4, beta=1.2, weights_smoothing=1):
         beta_dist = th.distributions.beta.Beta(alfa, beta)
         w = th.exp(beta_dist.log_prob((th.arange(0, diffusion.num_timesteps) / diffusion.num_timesteps)))
         self.diffusion = diffusion
-        self._weights = w.numpy() + 1  # np.ones([diffusion.num_timesteps])
+        self._weights = w.numpy() + weights_smoothing  # np.ones([diffusion.num_timesteps])
 
     def weights(self):
         return self._weights

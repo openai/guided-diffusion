@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
-from .unet import SuperResModel, UNetModel, EncoderUNetModel
+from .unet import SuperResModel, EncoderUNetModel
 import numpy as np
 
 # NUM_CLASSES = 1000
@@ -68,7 +68,9 @@ def model_and_diffusion_defaults():
         use_new_attention_order=False,
         image_size=32,
         in_channels=3,
-        num_classes=None
+        num_classes=None,
+        model_switching_timestep=30,
+        model_name="UNetModel",
     )
     res.update(diffusion_defaults())
     return res
@@ -105,6 +107,8 @@ def create_model_and_diffusion(
         resblock_updown,
         use_fp16,
         use_new_attention_order,
+        model_name,
+        model_switching_timestep,
         num_classes=None,
 ):
     model = create_model(
@@ -112,6 +116,8 @@ def create_model_and_diffusion(
         in_channels,
         num_channels,
         num_res_blocks,
+        model_name=model_name,
+        model_switching_timestep=model_switching_timestep,
         channel_mult=channel_mult,
         learn_sigma=learn_sigma,
         class_cond=class_cond,
@@ -145,6 +151,8 @@ def create_model(
         in_channels,
         num_channels,
         num_res_blocks,
+        model_name,
+        model_switching_timestep,
         channel_mult="",
         learn_sigma=False,
         class_cond=False,
@@ -158,7 +166,7 @@ def create_model(
         resblock_updown=False,
         use_fp16=False,
         use_new_attention_order=False,
-        num_classes=None
+        num_classes=None,
 ):
     if channel_mult == "":
         if image_size == 512:
@@ -182,7 +190,15 @@ def create_model(
     for res in attention_resolutions.split(","):
         attention_ds.append(image_size // int(res))
 
-    return UNetModel(
+    if model_name == "UNetModel":
+        print("Using single model")
+        from .unet import UNetModel as Model
+    elif model_name == "TwoPartsUNetModel":
+        print("Using two parts model")
+        from .two_parts_model import TwoPartsUNetModel as Model
+    else:
+        raise NotImplementedError
+    return Model(
         image_size=image_size,
         in_channels=in_channels,
         model_channels=num_channels,
@@ -200,8 +216,8 @@ def create_model(
         use_scale_shift_norm=use_scale_shift_norm,
         resblock_updown=resblock_updown,
         use_new_attention_order=use_new_attention_order,
+        model_switching_timestep=model_switching_timestep
     )
-
 
 def create_classifier_and_diffusion(
         image_size,
@@ -391,7 +407,7 @@ def sr_create_model(
         attention_resolutions=tuple(attention_ds),
         dropout=dropout,
         channel_mult=channel_mult,
-        num_classes=(NUM_CLASSES if class_cond else None),
+        num_classes=None, #(NUM_CLASSES if class_cond else None),
         use_checkpoint=use_checkpoint,
         num_heads=num_heads,
         num_head_channels=num_head_channels,

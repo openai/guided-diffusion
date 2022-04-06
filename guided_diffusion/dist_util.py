@@ -14,7 +14,7 @@ import torch.distributed as dist
 # Change this to reflect your cluster layout.
 # The GPU for a given rank is (rank % GPUS_PER_NODE).
 GPUS_PER_NODE = 2
-
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 SETUP_RETRY_COUNT = 3
 GPU_ID = ""
 
@@ -24,13 +24,11 @@ def setup_dist(args):
     """
     global GPU_ID
     if args.gpu_id == -1:
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
         GPU_ID=""
     elif args.gpu_id!=-2:
-        GPU_ID = f":{args.gpu_id}"
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
+        # GPU_ID = f":{args.gpu_id}"
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
 
     if dist.is_initialized():
         return
@@ -89,9 +87,14 @@ def sync_params(params):
     """
     Synchronize a sequence of Tensors across ranks from rank 0.
     """
-    for p in params:
-        with th.no_grad():
-            dist.broadcast(p, 0)
+    # if GPU_ID!="":
+    #     rank = int(GPU_ID[-1:])
+    # else:
+    #     rank = 0
+    if GPU_ID=="":
+        for p in params:
+            with th.no_grad():
+                dist.broadcast(p, 0)
 
 
 def _find_free_port():

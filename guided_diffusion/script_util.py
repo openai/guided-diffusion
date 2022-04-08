@@ -23,6 +23,7 @@ def diffusion_defaults():
         learn_sigma=False,
         diffusion_steps=1000,
         noise_schedule="linear",
+        first_step_beta=None,
         timestep_respacing="",
         use_kl=False,
         predict_xstart=False,
@@ -97,6 +98,7 @@ def create_model_and_diffusion(
         dropout,
         diffusion_steps,
         noise_schedule,
+        first_step_beta,
         timestep_respacing,
         use_kl,
         predict_xstart,
@@ -137,11 +139,13 @@ def create_model_and_diffusion(
         steps=diffusion_steps,
         learn_sigma=learn_sigma,
         noise_schedule=noise_schedule,
+        first_step_beta=first_step_beta,
         use_kl=use_kl,
         predict_xstart=predict_xstart,
         rescale_timesteps=rescale_timesteps,
         rescale_learned_sigmas=rescale_learned_sigmas,
         timestep_respacing=timestep_respacing,
+        dae_model=model_name=="TwoPartsUNetModelDAE"
     )
     return model, diffusion
 
@@ -196,6 +200,8 @@ def create_model(
     elif model_name == "TwoPartsUNetModel":
         print("Using two parts model")
         from .two_parts_model import TwoPartsUNetModel as Model
+    elif model_name == "TwoPartsUNetModelDAE":
+        from .two_parts_model_DAE import TwoPartsUNetModelDAE as Model
     else:
         raise NotImplementedError
     return Model(
@@ -424,13 +430,15 @@ def create_gaussian_diffusion(
         learn_sigma=False,
         sigma_small=False,
         noise_schedule="linear",
+        first_step_beta=None,
         use_kl=False,
         predict_xstart=False,
         rescale_timesteps=False,
         rescale_learned_sigmas=False,
         timestep_respacing="",
+        dae_model=False
 ):
-    betas = gd.get_named_beta_schedule(noise_schedule, steps)
+    betas = gd.get_named_beta_schedule(noise_schedule, steps, first_step_beta)
     if use_kl:
         loss_type = gd.LossType.RESCALED_KL
     elif rescale_learned_sigmas:
@@ -456,6 +464,7 @@ def create_gaussian_diffusion(
         ),
         loss_type=loss_type,
         rescale_timesteps=rescale_timesteps,
+        dae_model=dae_model
     )
 
 

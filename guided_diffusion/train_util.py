@@ -125,7 +125,7 @@ class TrainLoop:
 
         if th.cuda.is_available():
             self.use_ddp = True
-            find_unused_params = isinstance(self.model, TwoPartsUNetModel)
+            find_unused_params = not isinstance(self.model, UNetModel)
             self.ddp_model = DDP(
                 self.model,
                 device_ids=[dist_util.dev()],
@@ -312,12 +312,12 @@ class TrainLoop:
         for rate, params in zip(self.ema_rate, self.ema_params):
             save_checkpoint(rate, params)
 
-        if dist.get_rank() == 0:
-            with bf.BlobFile(
-                    bf.join(get_blob_logdir(), f"opt{(self.step + self.resume_step):06d}.pt"),
-                    "wb",
-            ) as f:
-                th.save(self.opt.state_dict(), f)
+        # if dist.get_rank() == 0:
+        #     with bf.BlobFile(
+        #             bf.join(get_blob_logdir(), f"opt{(self.step + self.resume_step):06d}.pt"),
+        #             "wb",
+        #     ) as f:
+        #         th.save(self.opt.state_dict(), f)
 
         dist.barrier()
 
@@ -359,7 +359,7 @@ class TrainLoop:
         return all_images, tasks
 
     @th.no_grad()
-    def plot(self, task_id, step, num_exammples=4):
+    def plot(self, task_id, step, num_exammples=8):
         sample, _ = self.generate_examples(task_id, num_exammples)
         samples_grid = make_grid(sample.detach().cpu(), num_exammples, normalize=True).permute(1, 2, 0)
         sample_wandb = wandb.Image(samples_grid.permute(2, 0, 1), caption=f"sample_task_{task_id}")

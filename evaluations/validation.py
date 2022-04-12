@@ -67,15 +67,17 @@ class Validator:
                 if dataset.lower() in ["fashionmnist", "doublemnist"]:
                     x = x.repeat([1, 3, 1, 1])
                 distribution_orig.append(self.score_model_func(x.to(self.score_model_device)).cpu().detach().numpy())
-        example, _ = train_loop.generate_examples(task_id=task_id, n_examples_per_task=n_generated_examples, only_one_task=True,
-                                                  batch_size=batch_size)
-        example = example.to(self.score_model_device)
-        if dataset.lower() in ["fashionmnist", "doublemnist"]:
-            example = example.repeat([1, 3, 1, 1])
-        distribution_gen = self.score_model_func(example).cpu().numpy().reshape(-1, self.dims)
-        # distribution_gen.append(self.score_model_func(example))
 
-        # distribution_gen = torch.cat(distribution_gen).cpu().detach().numpy().reshape(-1, self.dims)
+        examples_to_generate = n_generated_examples
+        while examples_to_generate > 0:
+            example, _ = train_loop.generate_examples(task_id=task_id, n_examples_per_task=batch_size, only_one_task=True)
+            example = example.to(self.score_model_device)
+            if dataset.lower() in ["fashionmnist", "doublemnist"]:
+                example = example.repeat([1, 3, 1, 1])
+            distribution_gen.append(self.score_model_func(example).cpu().detach())#.numpy().reshape(-1, self.dims))
+            # distribution_gen = self.score_model_func(example).cpu().numpy().reshape(-1, self.dims)
+
+        distribution_gen = torch.cat(distribution_gen).numpy().reshape(-1, self.dims)
         # distribution_gen = np.array(np.concatenate(distribution_gen)).reshape(-1, self.dims)
         if not precalculated_statistics:
             distribution_orig = np.array(np.concatenate(distribution_orig)).reshape(-1, self.dims)

@@ -106,6 +106,8 @@ def main():
         else:
             raise NotImplementedError()  # Adapt CERN validator
             # validator = CERN_Validator(dataloaders=val_loaders, stats_file_name=stats_file_name, device=dist_util.dev())
+    else:
+        validator = None
 
     fid_table = OrderedDict()
     precision_table = OrderedDict()
@@ -180,7 +182,9 @@ def main():
             class_cond=args.class_cond,
             max_class=max_class,
             generate_previous_examples_at_start_of_new_task=args.generate_previous_examples_at_start_of_new_task,
-            generate_previous_samples_continuously=args.generate_previous_samples_continuously
+            generate_previous_samples_continuously=args.generate_previous_samples_continuously,
+            validator=validator,
+            validation_interval=args.validation_interval
         )
         train_loop.run_loop()
         fid_table[task_id] = OrderedDict()
@@ -242,7 +246,8 @@ def create_argparser():
         scheduler_rate=1.0,
         use_task_index=True,
         skip_validation=False,
-        n_examples_validation=128,
+        n_examples_validation=5000,
+        validation_interval=25000,
         use_gpu_for_validation=True,
         n_generated_examples_per_task=1000,
         first_task_num_steps=5000,

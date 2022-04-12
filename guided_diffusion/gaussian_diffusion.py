@@ -26,11 +26,16 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, first_step_b
     Beta schedules may be added, but should not be removed or changed once
     they are committed to maintain backwards compatibility.
     """
+    if num_diffusion_timesteps < 10:
+        scale = 100 / num_diffusion_timesteps
+        multiply = 0.01
+    else:
+        scale = 1000 / num_diffusion_timesteps
+        multiply = 0.001
     if schedule_name == "linear":
         # Linear schedule from Ho et al, extended to work for any number of
         # diffusion steps.
-        scale = 1000 / num_diffusion_timesteps
-        beta_start = scale * 0.0001
+        beta_start = scale * multiply
         beta_end = scale * 0.02
         return np.linspace(
             beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
@@ -43,8 +48,7 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, first_step_b
     elif schedule_name == "linear_combine":
         assert first_step_beta is not None
         first_step_beta = float(first_step_beta)
-        scale = 1000 / num_diffusion_timesteps
-        beta_start = scale * 0.0001
+        beta_start = scale * multiply
         beta_end = scale * 0.02
         linear_betas = np.linspace(
             beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
@@ -742,17 +746,19 @@ class GaussianDiffusion:
         )
         kl = normal_kl(
             true_mean, true_log_variance_clipped, out["mean"], out["log_variance"]
-        ) # Calculate kl for all examples even with timestep=0 It will be overwritten later on
+        )  # Calculate kl for all examples even with timestep=0 It will be overwritten later on
         kl = mean_flat(kl) / np.log(2.0)
         if self.dae_model:
+            # out["log_variance"] = th.zeros_like(out["log_variance"]) + self.constant_sigma * 2
             decoder_mse = (out["mean"] - x_start) ** 2
             decoder_loss_0 = mean_flat(decoder_mse)
         else:
             decoder_nll = -discretized_gaussian_log_likelihood(
                 x_start, means=out["mean"], log_scales=0.5 * out["log_variance"]
             )
+            # print(th.exp(-0.5 * out["log_variance"][t==0]).mean().item())
             assert decoder_nll.shape == x_start.shape
-            decoder_loss_0 = mean_flat(decoder_nll)/ np.log(2.0)
+            decoder_loss_0 = mean_flat(decoder_nll) / np.log(2.0)
 
         # At the first timestep return the decoder NLL or MSE,
         # otherwise return KL(q(x_{t-1}|x_t,x_0) || p(x_{t-1}|x_t))
@@ -873,7 +879,10 @@ class GaussianDiffusion:
                 model_kwargs=model_kwargs,
             )["output"]
             if self.loss_type == LossType.RESCALED_KL:
-                terms["loss"] *= self.num_timesteps
+                if self.dae_model:
+                    terms["loss"] *= (self.num_timesteps - 1)
+                else:
+                    terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
             model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
 

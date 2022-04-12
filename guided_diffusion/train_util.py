@@ -20,7 +20,6 @@ from .resample import LossAwareSampler, UniformSampler, TaskAwareSampler
 
 import wandb
 
-
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
 # 20-21 within the first ~1K steps of training.
@@ -60,7 +59,9 @@ class TrainLoop:
             class_cond=False,
             max_class=None,
             generate_previous_examples_at_start_of_new_task=False,
-            generate_previous_samples_continuously=False
+            generate_previous_samples_continuously=False,
+            validator=None,
+            validation_interval=None
     ):
         self.params = params
         self.task_id = task_id
@@ -144,6 +145,11 @@ class TrainLoop:
             self.ddp_model = self.model
         self.generate_previous_examples_at_start_of_new_task = generate_previous_examples_at_start_of_new_task
         self.generate_previous_samples_continuously = generate_previous_samples_continuously
+        self.validator = validator
+        if validator is None:
+            self.validation_interval = self.num_steps + 1 #Skipping validation
+        else:
+            self.validation_interval = validation_interval
 
     def _load_and_sync_parameters(self):
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
@@ -210,6 +216,18 @@ class TrainLoop:
                     self.plot(self.task_id, self.step)
                 if self.step % self.scheduler_step == 0:
                     self.scheduler.step()
+                if self.step % self.validation_interval == 0:
+                    logger.log(f"Validation for step {self.step}")
+                    fid_result, precision, recall = self.validator.calculate_results(train_loop=self,
+                                                                                     task_id=self.task_id,
+                                                                                     dataset=self.params.dataset,
+                                                                                     n_generated_examples=self.params.n_examples_validation,
+                                                                                     batch_size=self.params.microbatch if self.params.microbatch > 0 else self.params.batch_size)
+                    wandb.log({"fid": fid_result})
+                    wandb.log({"precision": precision})
+                    wandb.log({"recall": recall})
+                    logger.log(f"FID: {fid_result}, Prec: {precision}, Rec: {recall}")
+
             self.step += 1
         # Save the last checkpoint if it wasn't already saved.
         if not self.skip_save:
@@ -245,8 +263,9 @@ class TrainLoop:
             if self.generate_previous_samples_continuously and (self.task_id > 0):
                 shape = [self.batch_size, self.in_channels, self.image_size, self.image_size]
                 prev_loss = self.diffusion.calculate_loss_previous_task(current_model=self.ddp_model,
-                                                                        prev_model=self.prev_ddp_model, #Frozen copy of the model
-                                                                        schedule_sampler= self.schedule_sampler,
+                                                                        prev_model=self.prev_ddp_model,
+                                                                        # Frozen copy of the model
+                                                                        schedule_sampler=self.schedule_sampler,
                                                                         task_id=self.task_id,
                                                                         n_examples_per_task=self.batch_size,
                                                                         shape=shape,
@@ -413,7 +432,7 @@ def find_ema_checkpoint(main_checkpoint, step, rate):
 def log_loss_dict(diffusion, ts, losses):
     for key, values in losses.items():
         logger.logkv_mean(key, values.mean().item())
-        if key!="prev_kl":
+        if key != "prev_kl":
             # Log the quantiles (four quartiles, in particular).
             for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
                 quartile = int(4 * sub_t / diffusion.num_timesteps)

@@ -27,8 +27,8 @@ def CelebA(root, skip_normalization=False, train_aug=False, image_size=64, targe
         transforms.Resize(image_size),
         transforms.RandomHorizontalFlip(),
         transforms.CenterCrop(image_size),
-        transforms.ToTensor()
-        # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
     dataset = torchvision.datasets.CelebA(root=root, download=True, transform=transform,
                                           target_type=target_type)

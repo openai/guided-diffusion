@@ -14,7 +14,7 @@ class Validator:
         self.n_classes = n_classes
         self.device = device
         if not score_model_device:
-            score_model_device=device
+            score_model_device = device
         self.dataset = dataset
         self.score_model_device = score_model_device
         self.dataloaders = dataloaders
@@ -68,13 +68,22 @@ class Validator:
                     x = x.repeat([1, 3, 1, 1])
                 distribution_orig.append(self.score_model_func(x.to(self.score_model_device)).cpu().detach().numpy())
 
+        examples, _ = train_loop.generate_examples(task_id=task_id,
+                                                   n_examples_per_task=n_generated_examples,
+                                                   only_one_task=True,
+                                                   batch_size=batch_size)
         examples_to_generate = n_generated_examples
+        i = 0
+        if self.score_model_device == torch.device("cpu"):
+            batch_size = 4500
         while examples_to_generate > 0:
-            example, _ = train_loop.generate_examples(task_id=task_id, n_examples_per_task=batch_size, only_one_task=True)
-            example = example.to(self.score_model_device)
+            example = examples[i * batch_size:min(n_generated_examples, (i + 1) * batch_size)].to(
+                self.score_model_device)
             if dataset.lower() in ["fashionmnist", "doublemnist"]:
                 example = example.repeat([1, 3, 1, 1])
-            distribution_gen.append(self.score_model_func(example).cpu().detach())#.numpy().reshape(-1, self.dims))
+            distribution_gen.append(self.score_model_func(example).cpu().detach())  # .numpy().reshape(-1, self.dims))
+            examples_to_generate -= batch_size
+            print(examples_to_generate)
             # distribution_gen = self.score_model_func(example).cpu().numpy().reshape(-1, self.dims)
 
         distribution_gen = torch.cat(distribution_gen).numpy().reshape(-1, self.dims)

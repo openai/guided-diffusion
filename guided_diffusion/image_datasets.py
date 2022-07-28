@@ -72,7 +72,7 @@ def _list_image_files_recursively(data_dir):
     for entry in sorted(bf.listdir(data_dir)):
         full_path = bf.join(data_dir, entry)
         ext = entry.split(".")[-1]
-        if "." in entry and ext.lower() in ["jpg", "jpeg", "png", "gif"]:
+        if "." in entry and ext.lower() in ["jpg", "jpeg", "png", "gif", "webp"]:
             results.append(full_path)
         elif bf.isdir(full_path):
             results.extend(_list_image_files_recursively(full_path))
